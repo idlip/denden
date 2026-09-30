@@ -96,6 +96,15 @@ All through =M-x= once loaded:
 - ~denden-find~ / ~denden-site~: project-aware find-file and switch-project,
   scoped to your repository root.
 
+* Example
+
+=example/= is the smallest real site built on this library: a home
+page, an about page, a blog listing, and a few posts, styled after
+[[https://github.com/janraasch/hugo-bearblog/][Hugo Bear Blog]]. See
+=example/README.org=.
+
+[[./example/screenshot.png]]
+
 * Roadmap
 
 - [X] SEO meta (description, canonical, OG/Twitter tags, JSON-LD) wired

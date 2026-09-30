@@ -1,0 +1,86 @@
+#+title: An Org-Mode Tour
+#+date: [2026-03-02 Mon]
+
+A longer post, mostly as a tour of what plain Org gives you for free once
+it goes through the =denden-html= backend: *bold*, /italic/, ~code~,
+=verbatim=, and +strikethrough+, all native syntax, no shortcodes.
+
+** Lists
+
+- Plain Org, exported straight through =denden-html=.
+- Nested items work the same as any other list.
+  - Like this one.
+- [X] Checkboxes render too.
+- [ ] Including the unfinished ones.
+
+
+1. Ordered lists as well.
+2. Second item.
+
+
+- Bear Blog :: A hosted, deliberately minimal blogging platform.
+- denden.el :: This library -- content stays real Org, not a rendered
+  HTML string, all the way through the build.
+
+** A Table
+
+| Language   | Paradigm   | Year |
+|------------+------------+------|
+| Emacs Lisp | Functional | 1985 |
+| Python     | Multi      | 1991 |
+
+** Links
+
+External: [[https://orgmode.org/][the Org-mode homepage]]. Internal:
+back to [[/blog/][the post list]].
+
+** A Blockquote
+
+#+begin_quote
+"An idiot admires complexity, a genius admires simplicity."
+--- Terry Davis
+#+end_quote
+
+** Code
+
+#+begin_src emacs-lisp
+(defun greet (name)
+  "Return a greeting for NAME."
+  (format "Hello, %s!" name))
+#+end_src
+
+#+begin_src python
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+#+end_src
+
+** Callouts
+
+#+begin_note
+This is a note callout -- =denden-special-block= renders
+=#+begin_note=/=tip=/=warn= as a styled div, real Org formatting inside.
+#+end_note
+
+#+begin_tip
+A tip callout: useful for asides the reader can skip.
+#+end_tip
+
+#+begin_warn
+A warning callout, for the one thing worth flagging loudly.
+#+end_warn
+
+** Sidenote and Footnotes
+
+Here is a sentence with a sidenote.{{{sidenote(An aside in the margin on
+wide screens, inline on narrow ones.)}}} And a sentence with a
+footnote.[fn:1]
+
+[fn:1] Footnotes work the same way: a reference here, a definition down
+here, both handled by ox-html itself, not by denden's own code.
+
+-----
+
+That covers most of what a normal post reaches for. The full feature
+sweep (radio targets, LaTeX, drawers, timestamps, and the rest) lives in
+denden's own test fixtures, not here -- this is meant to read like a
+post, not a checklist.

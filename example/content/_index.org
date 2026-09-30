@@ -1,0 +1,9 @@
+#+title: Home
+
+* A plain, honest blog
+
+This is [[https://github.com/idlip/denden][denden.el]]'s own example site: the same library idlip.in runs on,
+wired up here for something small instead. One stylesheet, two page
+kinds, no JavaScript, in the spirit of [[https://github.com/janraasch/hugo-bearblog/][Hugo Bear Blog]].
+
+Read the [[/blog/][blog]], or find out [[/about/][what this actually is]].

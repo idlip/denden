@@ -1,0 +1,13 @@
+#+title: About
+
+* About this site
+
+denden.el is a static-site library built on Org's own =ox-publish=. A
+site layer supplies its own content, theme, and page-dispatch function;
+this folder is the smallest one that still works.
+
+Two kinds of page live here. This one and the home page are plain: a
+title and some prose. Anything under [[/blog/][blog/]] gets a date above
+its content and shows up in the post list.
+
+Read =example-site.el= and =example-theme.el= for the whole thing.

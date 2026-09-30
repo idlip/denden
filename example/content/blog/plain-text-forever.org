@@ -1,0 +1,16 @@
+#+title: Plain Text, Forever
+#+date: [2026-02-14 Sat]
+
+Bear Blog's whole pitch is that a post can be small: no tracking, no
+bloat, a page that loads before you have finished clicking. That's a
+design choice, not a technology one. This example proves the same idea
+holds with an entirely different toolchain underneath it.
+
+#+begin_src emacs-lisp
+(require 'denden)
+(require 'example-site)
+(example-build t)
+#+end_src
+
+Run that, or =just example-build= from =denden/=, and =example/public/=
+comes out the other end.

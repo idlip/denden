@@ -1,0 +1,11 @@
+#+title: Hello, World
+#+date: [2026-01-08 Thu]
+
+A first post. Nothing fancy: a paragraph, then a list.
+
+- Plain Org, exported straight through the denden-html backend.
+- No shortcodes, no front matter beyond what Org already gives you.
+- One stylesheet, and that is the whole build.
+
+Wire your own site up the same way =example-site.el= does, against your
+own content and your own theme.
