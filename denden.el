@@ -27,6 +27,7 @@
 (require 'cl-lib)
 (require 'dom)
 (require 'ox-html)
+(require 'ox-ascii)
 (require 'ox-publish)
 (require 'filenotify)
 
@@ -505,15 +506,44 @@ soon as the child process starts."
          (org-publish-projects ',leaves)
          (denden-sweep-projects ',leaves)))))
 
+(defvar denden--git-lastmod-table nil
+  "A `denden-git-lastmod-table' result, let-bound around a single build call
+so `denden-git-lastmod' reads it instead of spawning one `git log' call
+per file. Function-scoped only: never set this globally, since a
+session-wide cache can go stale between builds.")
+
+(defun denden-git-lastmod-table (repository-directory)
+  "Return a hash-table mapping every git-tracked file under
+REPOSITORY-DIRECTORY to its last commit date (\"YYYY-MM-DD\"), via one
+`git log' call instead of one per file."
+  (let ((default-directory repository-directory)
+        (table (make-hash-table :test 'equal))
+        (date nil))
+    (with-temp-buffer
+      (when (zerop (call-process "git" nil t nil "log" "--name-only" "--format=commit:%cs"))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let ((line (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+            (cond
+             ((string-prefix-p "commit:" line) (setq date (substring line 7)))
+             ((string-empty-p line))
+             (t (let ((path (expand-file-name line repository-directory)))
+                  (unless (gethash path table) (puthash path date table))))))
+          (forward-line 1))))
+    table))
+
 (defun denden-git-lastmod (file)
   "Return FILE's last commit date as \"YYYY-MM-DD\", or nil if it has no git
-history."
-  (let ((default-directory (file-name-directory file)))
-    (with-temp-buffer
-      (when (zerop (call-process "git" nil t nil "log" "-1" "--format=%cs"
-                                  "--" (file-name-nondirectory file)))
-        (let ((output (string-trim (buffer-string))))
-          (unless (string-empty-p output) output))))))
+history. Reads `denden--git-lastmod-table' when a build has let-bound one,
+else spawns its own `git log' call for just FILE."
+  (if denden--git-lastmod-table
+      (gethash (expand-file-name file) denden--git-lastmod-table)
+    (let ((default-directory (file-name-directory file)))
+      (with-temp-buffer
+        (when (zerop (call-process "git" nil t nil "log" "-1" "--format=%cs"
+                                    "--" (file-name-nondirectory file)))
+          (let ((output (string-trim (buffer-string))))
+            (unless (string-empty-p output) output)))))))
 
 (defun denden--org-date-to-iso (date-string)
   "Convert org timestamp DATE-STRING, e.g. \"[2024-02-03 Sat]\", to
@@ -585,12 +615,19 @@ BASE-DIRECTORY, or nil if there are none."
     (length (split-string text nil t))))
 
 (defun denden--file-word-count (file)
-  "Return the word count of FILE's exported body."
-  (denden-html-word-count
-   (with-temp-buffer
-     (insert-file-contents file)
-     (org-mode)
-     (org-export-as 'denden-html nil nil t denden-html-default-options))))
+  "Return the word count of FILE's exported body, via a cheap ascii export
+so metadata collection doesn't pay for a second full HTML/htmlize pass."
+  (condition-case err
+      (length
+       (split-string
+        (with-temp-buffer
+          (insert-file-contents file)
+          (org-mode)
+          (org-export-as 'ascii nil nil t '(:with-toc nil :with-broken-links mark)))
+        nil t))
+    (error
+     (denden-log "ERROR word-counting %s: %s" file (error-message-string err))
+     (signal (car err) (cdr err)))))
 
 (defun denden-collect-page-metadata (leaf-projects)
   "Return a metadata plist for every page LEAF-PROJECTS publish, one per
