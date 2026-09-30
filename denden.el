@@ -617,17 +617,13 @@ BASE-DIRECTORY, or nil if there are none."
 (defun denden--file-word-count (file)
   "Return the word count of FILE's exported body, via a cheap ascii export
 so metadata collection doesn't pay for a second full HTML/htmlize pass."
-  (condition-case err
-      (length
-       (split-string
-        (with-temp-buffer
-          (insert-file-contents file)
-          (org-mode)
-          (org-export-as 'ascii nil nil t '(:with-toc nil :with-broken-links mark)))
-        nil t))
-    (error
-     (denden-log "ERROR word-counting %s: %s" file (error-message-string err))
-     (signal (car err) (cdr err)))))
+  (length
+   (split-string
+    (with-temp-buffer
+      (insert-file-contents file)
+      (org-mode)
+      (org-export-as 'ascii nil nil t '(:with-toc nil :with-broken-links mark)))
+    nil t)))
 
 (defun denden-collect-page-metadata (leaf-projects)
   "Return a metadata plist for every page LEAF-PROJECTS publish, one per
