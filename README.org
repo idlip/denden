@@ -1,0 +1,113 @@
+#+TITLE: denden: Org-mode static site generator for Emacs
+
+A static site generator for Org mode, built on =ox-publish=. Templates and
+page logic query the real Org AST (=org-element=), not rendered HTML.
+
+#+begin_quote
+  This package was written with the help of AI for accomplishing its purpose.
+#+end_quote
+
+* Why
+
+Most static site generators parse your content to an HTML string, then hand
+that string plus some metadata to a template. A template that needs real
+structure, a table of contents, an excerpt, a grouped list, has no tree left
+to query. It falls back to regexing the rendered HTML.
+
+denden keeps the real Org AST in scope for the whole build. Templates are
+plain Emacs Lisp lists. Structural queries walk =org-element= nodes
+directly, not rendered markup.
+
+* Features
+
+- Real AST access through the whole build. No regex over rendered HTML.
+- Templates are plain Emacs Lisp data (=(TAG ATTRS . CHILDREN)=, attributes
+  as a keyword plist). No template language to learn.
+- Async, non-blocking builds via =org-export-async-start=. Incremental
+  rebuilds reuse =ox-publish='s own timestamp cache.
+- A structural differ (compares two rendered pages, ignoring ids, classes,
+  and whitespace) and a permanent accessibility linter: one h1, every image
+  has alt text, no skipped heading levels, every internal link resolves.
+- Base16-ready syntax highlighting via =htmlize=, themeable with CSS custom
+  properties.
+- One =.org= file per post or page. A single-file container convention was
+  tried and reverted for build performance; see =docs/org-migrate-plan.org=
+  for why.
+- Dev-mode live reload and a one-command local preview server.
+- Feeds, sitemap, robots.txt, search index, and OG card generation, all
+  included.
+
+* Install
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/denden")
+(require 'denden)
+#+end_src
+
+
+* Setup
+
+A site layer sets these before calling any denden command:
+
+#+begin_src emacs-lisp
+(setq denden-content-directory "/path/to/your/content")
+(setq denden-publishing-directory "/path/to/your/output")
+(setq denden-project-root-directory "/path/to/your/site")
+(setq denden-full-build-function #'your-site-build)
+(setq denden-build-function #'your-site-build-async)
+#+end_src
+
+Optional, only needed for =M-x denden-new='s post-capture flow:
+
+#+begin_src emacs-lisp
+(setq denden-post-directory "/path/to/your/content/posts")
+#+end_src
+
+You also register your own =org-publish-project-alist= entry. Point
+=:publishing-function= at your site's own page-dispatch function. See
+=site/site.el='s "org-publish project definition" section for the pattern
+to copy.
+
+* Usage
+
+All through =M-x= once loaded:
+
+- ~denden-preview-current-file~: rebuild the file you are editing and open
+  or refresh it in a browser. The everyday command while writing. The
+  first call starts the preview server and opens the tab; every later call
+  just rebuilds and lets live reload refresh it.
+- ~denden-build~: build the whole site, using the cache. Skips unchanged
+  pages.
+- ~denden-clean-build~: wipe the cache, rebuild everything.
+- ~denden-build-serve~: build, then serve via ~denden-preview-command~
+  (default a plain HTTP server).
+- ~denden-clean~: delete the publishing directory outright. No rebuild.
+- ~denden-lint~: run the accessibility and structure linter over the
+  current build. Results go to =*denden-lint*=.
+- ~denden-list-drafts~: list every =#+draft: t= post in =*denden-drafts*=.
+- ~denden-diff~: structurally diff two rendered HTML files. A debugging
+  aid.
+- ~denden-new~: create a post. Prompts for a title and tags with
+  completion, then writes a new file under =denden-post-directory=.
+- ~denden-reload-all~: reload denden, site, and theme fresh from disk,
+  without restarting Emacs.
+- ~denden-watch-start~ / ~denden-auto-rebuild-mode~: watch content and
+  config for changes, then rebuild automatically with live reload.
+- ~denden-find~ / ~denden-site~: project-aware find-file and switch-project,
+  scoped to your repository root.
+
+* Roadmap
+
+- [X] SEO meta (description, canonical, OG/Twitter tags, JSON-LD) wired
+  into the generated =<head>=.
+- [ ] A real asset pipeline (concat, minify, fingerprint, SRI).
+- [ ] CI and deploy.
+
+* References
+
+- [[https://orgmode.org/worg/dev/org-export-reference.html][Org export reference]]. The =ox-*= API denden's backend is built on.
+  full design history and every settled decision behind denden's shape.
+
+* License
+
+MIT. See [[file:../LICENSE][LICENSE]].
