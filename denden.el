@@ -27,6 +27,7 @@
 (require 'cl-lib)
 (require 'dom)
 (require 'ox-html)
+(require 'rx)
 (require 'ox-ascii)
 (require 'ox-publish)
 (require 'filenotify)
@@ -101,6 +102,9 @@ alist of (SYMBOL . VALUE)."
       (append (list tag (denden-normalise-attributes attribute-spec))
               (mapcar #'denden-normalise-node children)))))
 
+(defconst denden-whitespace-run-regexp (rx (+ (any " \t\n\r")))
+  "Match a run of one or more whitespace characters, for collapsing.")
+
 (defun denden--escape-text (text)
   "Escape TEXT for use as HTML character data."
   (let ((text (replace-regexp-in-string "&" "&amp;" text)))
@@ -166,7 +170,7 @@ its string verbatim, unescaped."
 
 (defun denden--whitespace-only-string-p (text)
   "Return non-nil if TEXT is a string containing only whitespace."
-  (and (stringp text) (string-match-p "\\`[ \t\n\r]*\\'" text)))
+  (and (stringp text) (string-match-p (rx bos (* (any " \t\n\r")) eos) text)))
 
 (defun denden-html-to-template (node)
   "Convert libxml dom.el NODE into denden template-form sexp, dropping
@@ -235,8 +239,8 @@ file.")
   "Slugify TEXT into a lowercase, hyphen-separated id, or \"section\" if
 nothing alphanumeric survives."
   (let* ((slug (downcase text))
-         (slug (replace-regexp-in-string "[^a-z0-9]+" "-" slug))
-         (slug (replace-regexp-in-string "\\`-+\\|-+\\'" "" slug)))
+         (slug (replace-regexp-in-string (rx (+ (not (any "a-z0-9")))) "-" slug))
+         (slug (replace-regexp-in-string (rx (or (seq bos (+ "-")) (seq (+ "-") eos))) "" slug)))
     (if (string-empty-p slug) "section" slug)))
 
 (defun denden--unique-heading-id (candidate)
@@ -305,20 +309,37 @@ values. Return the matching page or nil."
               "/")))
     (seq-find (lambda (p) (equal (string-trim-right (plist-get p :url) "/") key)) all-pages)))
 
+(defun denden--resolve-relative-file-link (raw-path current-file all-pages)
+  "Resolve RAW-PATH, a same-directory-style [[file:other.org]] link written
+relative to CURRENT-FILE, against ALL-PAGES's :source values. Return the
+matching page, or nil if CURRENT-FILE is unknown or nothing matches."
+  (when current-file
+    (let ((absolute (expand-file-name raw-path (file-name-directory current-file))))
+      (seq-find (lambda (p) (equal (plist-get p :source) absolute)) all-pages))))
+
+
 (defun denden--strip-file-uri-prefix (html)
   "HTML with any \"file://\" prefix removed from a site-root-absolute href or
 src."
-  (replace-regexp-in-string "\\(href\\|src\\)=\"file://\\(/[^\"]*\\)\"" "\\1=\"\\2\"" html))
+  (replace-regexp-in-string
+   (rx (group (or "href" "src")) "=\"file://" (group "/" (* (not (any "\"")))) "\"")
+   "\\1=\"\\2\"" html))
+
+(defconst denden--href-or-src-attribute-regexp
+  (rx (group (or "href" "src")) "=\"" (group (* (not (any "\"")))) "\"")
+  "Match an href or src attribute, capturing its name and value.")
 
 (defun denden--escape-attribute-ampersands (html)
   "HTML with a bare & inside any href or src attribute value escaped to &amp;."
   (replace-regexp-in-string
-   "\\(href\\|src\\)=\"\\([^\"]*\\)\""
+   denden--href-or-src-attribute-regexp
    (lambda (whole)
-     (string-match "\\(href\\|src\\)=\"\\([^\"]*\\)\"" whole)
+     (string-match denden--href-or-src-attribute-regexp whole)
      (format "%s=\"%s\"" (match-string 1 whole)
              (replace-regexp-in-string
-              "&\\(amp;\\|lt;\\|gt;\\|quot;\\|#[0-9]+;\\|#x[0-9a-fA-F]+;\\)?"
+              (rx "&" (opt (group (or "amp;" "lt;" "gt;" "quot;"
+                                       (seq "#" (+ digit) ";")
+                                       (seq "#x" (+ hex) ";")))))
               (lambda (entity) (if (> (length entity) 1) entity "&amp;"))
               (match-string 2 whole))))
    html))
@@ -329,18 +350,27 @@ src."
   (denden--escape-attribute-ampersands (denden--strip-file-uri-prefix html)))
 
 (defun denden-link (link contents info)
-  "Transcode LINK like `org-html-link', but a resolvable [[/path]] link uses
-the target page's live title as text."
-  (let ((type (org-element-property :type link))
-        (raw-path (org-element-property :path link))
-        (all-pages (plist-get info :denden-all-pages)))
-    (if (and all-pages (equal type "file") (string-prefix-p "/" raw-path)
-             (not (and contents (string-match-p "<" contents))))
-        (let ((target (denden--resolve-site-path raw-path all-pages)))
-          (if target
-              (format "<a href=\"%s\">%s</a>" raw-path (org-html-encode-plain-text (plist-get target :title)))
-            (denden--fix-link-html (org-html-link link contents info))))
-      (denden--fix-link-html (org-html-link link contents info)))))
+  "Transcode LINK like `org-html-link', but a resolvable [[/path]] link, or a
+same-directory [[file:other.org]] link to a known page, uses the target
+page's live title as text and its real pretty URL as href."
+  (let* ((type (org-element-property :type link))
+         (raw-path (org-element-property :path link))
+         (all-pages (plist-get info :denden-all-pages))
+         (plain-description-p (not (and contents (string-match-p "<" contents)))))
+    (cond
+     ((and all-pages (equal type "file") (string-prefix-p "/" raw-path) plain-description-p)
+      (let ((target (denden--resolve-site-path raw-path all-pages)))
+        (if target
+            (format "<a href=\"%s\">%s</a>" raw-path (org-html-encode-plain-text (plist-get target :title)))
+          (denden--fix-link-html (org-html-link link contents info)))))
+     ((and all-pages (equal type "file") (not (file-name-absolute-p raw-path)) plain-description-p)
+      (let ((target (denden--resolve-relative-file-link
+                      raw-path (plist-get info :denden-current-file) all-pages)))
+        (if target
+            (format "<a href=\"/%s\">%s</a>" (plist-get target :url)
+                    (org-html-encode-plain-text (plist-get target :title)))
+          (denden--fix-link-html (org-html-link link contents info)))))
+     (t (denden--fix-link-html (org-html-link link contents info))))))
 
 (defconst denden-callout-types '("note" "tip" "warn")
   "Special-block types `denden-special-block' renders as a styled callout div.
@@ -361,17 +391,19 @@ Any other type passes through unchanged.")
 default table of contents and section numbers.")
 
 
-(defun denden-export-options-with-pages (all-pages)
-  "`denden-html-default-options' plus :denden-all-pages ALL-PAGES, for
-`denden-link's [[/path]] resolution."
-  (append denden-html-default-options (list :denden-all-pages all-pages)))
+(defun denden-export-options-with-pages (all-pages &optional current-file)
+  "`denden-html-default-options' plus :denden-all-pages ALL-PAGES and
+:denden-current-file CURRENT-FILE, for `denden-link's [[/path]] and
+same-directory [[file:other.org]] resolution."
+  (append denden-html-default-options
+          (list :denden-all-pages all-pages :denden-current-file current-file)))
 
 (defun denden-paragraph (paragraph contents info)
   "Transcode PARAGRAPH like `org-html-paragraph', dropping the \"Figure N:\"
 caption prefix and fixing image src."
   (denden--fix-link-html
    (replace-regexp-in-string
-    "<span class=\"figure-number\">Figure [0-9]+: *</span>"
+    (rx "<span class=\"figure-number\">Figure " (+ digit) ":" (* " ") "</span>")
     ""
     (org-html-paragraph paragraph contents info))))
 
@@ -414,9 +446,9 @@ no site chrome."
   (mapconcat
    (lambda (component)
      (let* ((lower (downcase component))
-            (hyphenated (replace-regexp-in-string "[ _]+" "-" lower))
-            (stripped (replace-regexp-in-string "[^a-z0-9-]" "" hyphenated))
-            (collapsed (replace-regexp-in-string "-\\{2,\\}" "-" stripped)))
+            (hyphenated (replace-regexp-in-string (rx (+ (any " _"))) "-" lower))
+            (stripped (replace-regexp-in-string (rx (not (any "a-z0-9-"))) "" hyphenated))
+            (collapsed (replace-regexp-in-string (rx (>= 2 "-")) "-" stripped)))
        (string-trim collapsed "-+" "-+")))
    (split-string relative-path "/") "/"))
 
@@ -553,7 +585,9 @@ else spawns its own `git log' call for just FILE."
 (defun denden-format-iso-date (iso-date format-string)
   "Render ISO-DATE (\"YYYY-MM-DD\") via FORMAT-STRING (`format-time-string'
 syntax). Returns \"\" if ISO-DATE is nil."
-  (if (and iso-date (string-match "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)\\'" iso-date))
+  (if (and iso-date (string-match
+                     (rx bos (group (= 4 digit)) "-" (group (= 2 digit)) "-" (group (= 2 digit)) eos)
+                     iso-date))
       (format-time-string format-string
                           (encode-time 0 0 0 (string-to-number (match-string 3 iso-date))
                                        (string-to-number (match-string 2 iso-date))
@@ -610,7 +644,7 @@ BASE-DIRECTORY, or nil if there are none."
   (let ((text (with-temp-buffer
                 (insert html)
                 (goto-char (point-min))
-                (while (re-search-forward "<[^>]+>" nil t) (replace-match " "))
+                (while (re-search-forward (rx "<" (+ (not (any ">"))) ">") nil t) (replace-match " "))
                 (buffer-string))))
     (length (split-string text nil t))))
 
@@ -711,7 +745,7 @@ links in BODY-HTML."
                    (not (gethash href seen)))
           (puthash href t seen)
           (push (list :href href
-                      :text (string-trim (replace-regexp-in-string "[ \t\n\r]+" " " (dom-texts a)))
+                      :text (string-trim (replace-regexp-in-string denden-whitespace-run-regexp " " (dom-texts a)))
                       :internal (string-prefix-p "/" href))
                 refs))))
     (nreverse refs)))
@@ -792,14 +826,14 @@ section."
 
 (defun denden--normalise-whitespace (text)
   "Return TEXT with whitespace runs collapsed to single spaces and trimmed."
-  (string-trim (replace-regexp-in-string "[ \t\n\r]+" " " text)))
+  (string-trim (replace-regexp-in-string denden-whitespace-run-regexp " " text)))
 
 (defun denden--page-skeleton (dom)
   "Return a normalised skeleton plist for DOM: headings, links, images,
 landmarks, and visible text."
   (list
    :headings (mapcar (lambda (h) (cons (dom-tag h) (denden--normalise-whitespace (dom-texts h))))
-                      (dom-search dom (lambda (el) (string-match-p "\\`h[1-6]\\'" (symbol-name (dom-tag el))))))
+                      (dom-search dom (lambda (el) (string-match-p (rx bos "h" (any "1-6") eos) (symbol-name (dom-tag el))))))
    :links (mapcar (lambda (a) (dom-attr a 'href)) (dom-by-tag dom 'a))
    :images (mapcar (lambda (img) (dom-attr img 'src)) (dom-by-tag dom 'img))
    :landmarks (sort (mapcar (lambda (el) (symbol-name (dom-tag el)))
@@ -840,7 +874,7 @@ match, else the differing fields."
   "Return ELEMENT's heading level, 1 to 6, if it is h1 through h6, else nil."
   (and (consp element)
        (let ((name (symbol-name (dom-tag element))))
-         (when (string-match "\\`h\\([1-6]\\)\\'" name)
+         (when (string-match (rx bos "h" (group (any "1-6")) eos) name)
            (string-to-number (match-string 1 name))))))
 
 (defun denden-lint-html-string (html &optional known-output-paths)
@@ -980,11 +1014,11 @@ BASE-URL."
 decoded."
   (string-trim
    (replace-regexp-in-string
-    "[ \t\n\r]+" " "
+    denden-whitespace-run-regexp " "
     (with-temp-buffer
       (insert html)
       (goto-char (point-min))
-      (while (re-search-forward "<[^>]+>" nil t) (replace-match " "))
+      (while (re-search-forward (rx "<" (+ (not (any ">"))) ">") nil t) (replace-match " "))
       (buffer-string)))))
 
 (defun denden--search-index-sentences (plain-text)
@@ -992,7 +1026,9 @@ decoded."
 characters or shorter."
   (seq-filter (lambda (s) (> (length s) 3))
               (mapcar #'string-trim
-                      (split-string (replace-regexp-in-string "\\([.!?]\\)[ \t\n]+" "\\1\1" plain-text) "\1"))))
+                      (split-string (replace-regexp-in-string
+                                     (rx (group (any ".!?")) (+ (any " \t\n"))) "\\1\1" plain-text)
+                                    "\1"))))
 
 (defun denden-search-index-json (pages)
   "Return the search-index.json payload: one {title url text} entry per
@@ -1092,15 +1128,15 @@ Set by the site layer, typically a \"posts\" subdirectory of
 Set by the site layer."
   :type 'directory :group 'denden)
 
-(defcustom denden-preview-base-url "http://localhost:8000"
+(defcustom denden-preview-base-url "http://localhost:7777"
   "Base URL `denden-preview-command''s server answers on."
   :type 'string :group 'denden)
 
 (defun denden--preview-port ()
-  "The port number in `denden-preview-base-url', or \"8000\" if it has none."
-  (if (string-match ":\\([0-9]+\\)\\'" denden-preview-base-url)
+  "The port number in `denden-preview-base-url', or \"7777\" if it has none."
+  (if (string-match (rx ":" (group (+ digit)) eos) denden-preview-base-url)
       (match-string 1 denden-preview-base-url)
-    "8000"))
+    "7777"))
 
 (defun denden--default-preview-command ()
   "Return the default `denden-preview-command': static-web-server, Nix run, or
