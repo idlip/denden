@@ -1019,16 +1019,12 @@ BASE-URL."
 ;; on click.
 
 (defun denden-html-plain-text (html)
-  "Return HTML with tags stripped and whitespace collapsed. Entities are not
-decoded."
-  (string-trim
-   (replace-regexp-in-string
-    denden-whitespace-run-regexp " "
-    (with-temp-buffer
-      (insert html)
-      (goto-char (point-min))
-      (while (re-search-forward (rx "<" (+ (not (any ">"))) ">") nil t) (replace-match " "))
-      (buffer-string)))))
+  "Return HTML with tags stripped, entities decoded, and whitespace
+collapsed, via a real HTML parse."
+  (denden--normalise-whitespace
+   (dom-inner-text (with-temp-buffer
+                      (insert html)
+                      (libxml-parse-html-region (point-min) (point-max))))))
 
 (defun denden--search-index-sentences (plain-text)
   "Split PLAIN-TEXT into sentences on \".\", \"!\", or \"?\", dropping any 3
