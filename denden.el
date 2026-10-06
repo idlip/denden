@@ -659,6 +659,14 @@ so metadata collection doesn't pay for a second full HTML/htmlize pass."
       (org-export-as 'ascii nil nil t '(:with-toc nil :with-broken-links mark)))
     nil t)))
 
+(defun denden--list-keyword-value (keywords name)
+  "Return NAME's #+KEYWORD: value from KEYWORDS, split into a list on
+whitespace. Checks plain NAME first, then NAME followed by \"[]\", the old
+Hugo/go-org array convention kept only for backward compatibility."
+  (split-string (or (cadr (assoc name keywords))
+                     (cadr (assoc (concat name "[]") keywords))
+                     "")))
+
 (defun denden-collect-page-metadata (leaf-projects)
   "Return a metadata plist for every page LEAF-PROJECTS publish, one per
 source file."
@@ -671,17 +679,18 @@ source file."
             (let* ((keywords (with-temp-buffer
                                (insert-file-contents source)
                                (org-mode)
-                               (org-collect-keywords '("TITLE" "TAGS[]" "REFS[]" "DATE" "ALIASES[]"))))
+                               (org-collect-keywords '("TITLE" "TAGS" "TAGS[]" "REFS" "REFS[]"
+                                                        "DATE" "ALIASES" "ALIASES[]"))))
                    (output (denden-output-file-for source project))
                    (word-count (denden--file-word-count source)))
               (push (list :url (denden-pretty-url (file-relative-name output pub-dir))
                           :title (or (cadr (assoc "TITLE" keywords)) (file-name-base source))
-                          :tags (split-string (or (cadr (assoc "TAGS[]" keywords)) ""))
-                          :refs (split-string (or (cadr (assoc "REFS[]" keywords)) ""))
+                          :tags (denden--list-keyword-value keywords "TAGS")
+                          :refs (denden--list-keyword-value keywords "REFS")
                           :date (denden--org-date-to-iso (cadr (assoc "DATE" keywords)))
                           :section (denden--source-section source base-dir)
                           :source source
-                          :aliases (split-string (or (cadr (assoc "ALIASES[]" keywords)) ""))
+                          :aliases (denden--list-keyword-value keywords "ALIASES")
                           :wordcount word-count
                           :readingtime (max 1 (round (/ word-count 200.0))))
                     pages))))))
@@ -1155,7 +1164,7 @@ Runs with `denden-publishing-directory' as its working directory. See
 `denden--default-preview-command' for how this default is picked."
   :type 'string :group 'denden)
 
-(defcustom denden-new-post-template "#+title: %s\n#+date: %s\n#+tags[]: %s\n#+draft: %s\n\n"
+(defcustom denden-new-post-template "#+title: %s\n#+date: %s\n#+tags: %s\n#+draft: %s\n\n"
   "Template `denden-new' formats and inserts into a new post buffer.
 Formatted with title, today's date, space-separated tags, and
 \"true\"/\"false\"."
@@ -1410,15 +1419,17 @@ shown in *denden-lint*."
       (display-buffer (current-buffer)))))
 
 (defun denden--all-content-tags ()
-  "Return every distinct #+TAGS[] value used across `denden-content-directory'."
+  "Return every distinct #+tags: (or #+tags[]:) value used across
+`denden-content-directory'."
   (delete-dups
    (seq-mapcat
     (lambda (file)
-      (split-string (or (cadr (assoc "TAGS[]" (with-temp-buffer
-                                                  (insert-file-contents file)
-                                                  (org-mode)
-                                                  (org-collect-keywords '("TAGS[]")))))
-                         "")))
+      (denden--list-keyword-value
+       (with-temp-buffer
+         (insert-file-contents file)
+         (org-mode)
+         (org-collect-keywords '("TAGS" "TAGS[]")))
+       "TAGS"))
     (directory-files-recursively denden-content-directory "\\.org\\'"))))
 
 (defvar org-capture-templates)
