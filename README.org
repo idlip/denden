@@ -20,7 +20,7 @@ directly, not rendered markup.
 
 * Features
 
-- Real AST access through the whole build. No regex over rendered HTML.
+- AST access from org-element instead of regexp replaces.
 - Templates are plain Emacs Lisp data (=(TAG ATTRS . CHILDREN)=, attributes
   as a keyword plist). No template language to learn.
 - Async, non-blocking builds via =org-export-async-start=. Incremental
