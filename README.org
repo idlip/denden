@@ -36,6 +36,8 @@ directly, not rendered markup.
 - Dev-mode live reload and a one-command local preview server.
 - Feeds, sitemap, robots.txt, search index, and OG card generation, all
   included.
+- Callouts: =#+begin_note=, =#+begin_tip= and =#+begin_warn= special blocks render as a labelled =role="note"= box.
+- Every heading gets a =#= link to its own id at build time.
 
 * Install
 
@@ -95,6 +97,26 @@ All through =M-x= once loaded:
   config for changes, then rebuild automatically with live reload.
 - ~denden-find~ / ~denden-site~: project-aware find-file and switch-project,
   scoped to your repository root.
+
+* Writing
+
+Posts are plain Org. Two conventions on top:
+
+Callouts are Org special blocks of type =note=, =tip= or =warn=. Org formatting works inside.
+
+#+begin_src org
+,#+begin_note
+Denden builds one =.org= file per page.
+,#+end_note
+
+,#+begin_warn
+A *clean build* wipes the cache first.
+,#+end_warn
+#+end_src
+
+Each renders as a =div.callout= with =role="note"=, a =data-callout= of its type, and a visible label paragraph first (Note, Tip, Warning), so the type never depends on colour alone. Style them through =[role="note"]= and =[data-callout]=. Any other special block type falls back to Org's default rendering. The types and labels live in =denden-callout-types=.
+
+Heading links need nothing from the author: every heading ends with =<a class="heading-anchor" href="#id">#</a>=.
 
 * Example
 

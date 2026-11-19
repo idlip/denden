@@ -28,6 +28,7 @@
 (require 'dom)
 (require 'ox-html)
 (require 'rx)
+(require 'url-parse)
 (require 'ox-ascii)
 (require 'ox-publish)
 (require 'filenotify)
@@ -180,7 +181,7 @@ whitespace-only text nodes."
    ((stringp node) node)
    (t (cl-destructuring-bind (tag attributes . children) node
         (let ((plist (cl-loop for (name . value) in attributes
-                               append (list (denden--attribute-symbol-to-keyword name) value)))
+                              append (list (denden--attribute-symbol-to-keyword name) value)))
               (kept-children (delq nil (mapcar #'denden-html-to-template children))))
           (append (list tag plist) kept-children))))))
 
@@ -277,9 +278,15 @@ within a denden-html export only."
 (advice-add 'org-html--reference :around #'denden--advise-html-reference)
 
 (defun denden-headline (headline contents info)
-  "Transcode HEADLINE like `org-html-headline'; id logic lives in the
-`org-html--reference' advice instead."
-  (org-html-headline headline contents info))
+  "Transcode HEADLINE like `org-html-headline', plus a # link to its own id."
+  (let ((html (org-html-headline headline contents info)))
+    (if (string-match (rx "<h" (group (any "2-6")) " id=\"" (group (+ (not (any "\"")))) "\""
+                          (* (not (any ">"))) ">" (*? anything) (group "</h" (backref 1) ">"))
+                      html)
+        (replace-match (format "<a class=\"heading-anchor\" href=\"#%s\" aria-label=\"Link to this section\">#</a></h%s>"
+                               (match-string 2 html) (match-string 1 html))
+                       t t html 3)
+      html)))
 
 (defun denden-src-block (src-block contents info)
   "Transcode SRC-BLOCK like `org-html-src-block', but always as CSS classes,
@@ -338,8 +345,8 @@ src."
      (format "%s=\"%s\"" (match-string 1 whole)
              (replace-regexp-in-string
               (rx "&" (opt (group (or "amp;" "lt;" "gt;" "quot;"
-                                       (seq "#" (+ digit) ";")
-                                       (seq "#x" (+ hex) ";")))))
+                                      (seq "#" (+ digit) ";")
+                                      (seq "#x" (+ hex) ";")))))
               (lambda (entity) (if (> (length entity) 1) entity "&amp;"))
               (match-string 2 whole))))
    html))
@@ -365,24 +372,23 @@ page's live title as text and its real pretty URL as href."
           (denden--fix-link-html (org-html-link link contents info)))))
      ((and all-pages (equal type "file") (not (file-name-absolute-p raw-path)) plain-description-p)
       (let ((target (denden--resolve-relative-file-link
-                      raw-path (plist-get info :denden-current-file) all-pages)))
+                     raw-path (plist-get info :denden-current-file) all-pages)))
         (if target
             (format "<a href=\"/%s\">%s</a>" (plist-get target :url)
                     (org-html-encode-plain-text (plist-get target :title)))
           (denden--fix-link-html (org-html-link link contents info)))))
      (t (denden--fix-link-html (org-html-link link contents info))))))
 
-(defconst denden-callout-types '("note" "tip" "warn")
-  "Special-block types `denden-special-block' renders as a styled callout div.
-Any other type passes through unchanged.")
-
+(defconst denden-callout-types '(("note" . "Note") ("tip" . "Tip") ("warn" . "Warning"))
+  "Callout special-block types and their visible labels.")
 
 (defun denden-special-block (special-block contents info)
-  "Transcode SPECIAL-BLOCK as a callout div when TYPE is in
-`denden-callout-types', else like `org-html-special-block'."
-  (let ((type (downcase (org-element-property :type special-block))))
-    (if (member type denden-callout-types)
-        (format "<div class=\"callout callout-%s\">\n%s</div>" type (or contents ""))
+  "Transcode SPECIAL-BLOCK as a labelled callout if its type is a callout."
+  (let* ((type (downcase (org-element-property :type special-block)))
+         (label (cdr (assoc type denden-callout-types))))
+    (if label
+        (format "<div class=\"callout\" role=\"note\" data-callout=\"%s\">\n<p>%s</p>\n%s</div>"
+                type label (or contents ""))
       (org-html-special-block special-block contents info))))
 
 (defconst denden-html-default-options
@@ -470,8 +476,8 @@ publishing functions must call this, not `org-export-output-file-name'."
          ;; An _index.org names a section/site index, mapping to that
          ;; directory's plain index.html, not a literal _index.html.
          (index-fixed (if (equal (file-name-nondirectory no-ext) "_index")
-                           (concat (or (file-name-directory no-ext) "") "index")
-                         no-ext))
+                          (concat (or (file-name-directory no-ext) "") "index")
+                        no-ext))
          (slugged (denden-slugify-path index-fixed))
          (pretty (denden--pretty-output-relative-path slugged)))
     (expand-file-name (if output-extension (concat pretty output-extension) relative) pub-dir)))
@@ -498,7 +504,7 @@ directory left empty by it."
       (unless (member (expand-file-name file) expected)
         (delete-file file)))
     (dolist (dir (sort (directory-files-recursively pub-dir ".*" t)
-                        (lambda (a b) (> (length a) (length b)))))
+                       (lambda (a b) (> (length a) (length b)))))
       (when (and (file-directory-p dir)
                  (null (directory-files dir nil directory-files-no-dot-files-regexp)))
         (delete-directory dir)))))
@@ -573,7 +579,7 @@ else spawns its own `git log' call for just FILE."
     (let ((default-directory (file-name-directory file)))
       (with-temp-buffer
         (when (zerop (call-process "git" nil t nil "log" "-1" "--format=%cs"
-                                    "--" (file-name-nondirectory file)))
+                                   "--" (file-name-nondirectory file)))
           (let ((output (string-trim (buffer-string))))
             (unless (string-empty-p output) output)))))))
 
@@ -607,9 +613,9 @@ SOURCE sits directly in it."
   "Return non-nil if FILE's #+KEYWORD: value is \"t\" or \"true\" (case
 insensitive)."
   (let ((value (cadr (assoc keyword (with-temp-buffer
-                                       (insert-file-contents file)
-                                       (org-mode)
-                                       (org-collect-keywords (list keyword)))))))
+                                      (insert-file-contents file)
+                                      (org-mode)
+                                      (org-collect-keywords (list keyword)))))))
     (and value (member (downcase value) '("t" "true")))))
 
 (defun denden-file-is-draft-p (file)
@@ -664,8 +670,8 @@ so metadata collection doesn't pay for a second full HTML/htmlize pass."
 whitespace. Checks plain NAME first, then NAME followed by \"[]\", the old
 Hugo/go-org array convention kept only for backward compatibility."
   (split-string (or (cadr (assoc name keywords))
-                     (cadr (assoc (concat name "[]") keywords))
-                     "")))
+                    (cadr (assoc (concat name "[]") keywords))
+                    "")))
 
 (defun denden-collect-page-metadata (leaf-projects)
   "Return a metadata plist for every page LEAF-PROJECTS publish, one per
@@ -680,7 +686,7 @@ source file."
                                (insert-file-contents source)
                                (org-mode)
                                (org-collect-keywords '("TITLE" "TAGS" "TAGS[]" "REFS" "REFS[]"
-                                                        "DATE" "ALIASES" "ALIASES[]"))))
+                                                       "DATE" "ALIASES" "ALIASES[]"))))
                    (output (denden-output-file-for source project))
                    (word-count (denden--file-word-count source)))
               (push (list :url (denden-pretty-url (file-relative-name output pub-dir))
@@ -806,7 +812,7 @@ wrapping <p> stripped."
                       (mapcar #'denden-parse-topic-item (org-element-map plain-list 'item #'identity))
                     nil))
                 (org-element-map (org-element-contents headline) 'plain-list #'identity
-                                  nil nil 'headline))))
+                                 nil nil 'headline))))
 
 (defun denden-parse-topic-list (file)
   "Parse FILE (a #+layout: topic-list content file) into (:label :items)
@@ -820,9 +826,9 @@ groups, one per top-level heading."
   "Return the exported body of FILE up to, but not including, its first H2
 section."
   (let* ((body-html (with-temp-buffer
-                       (insert-file-contents file)
-                       (org-mode)
-                       (org-export-as 'denden-html nil nil t denden-html-default-options)))
+                      (insert-file-contents file)
+                      (org-mode)
+                      (org-export-as 'denden-html nil nil t denden-html-default-options)))
          (split-point (string-match "<div id=\"outline-container-" body-html)))
     (if split-point (substring body-html 0 split-point) body-html)))
 
@@ -842,12 +848,12 @@ section."
 landmarks, and visible text."
   (list
    :headings (mapcar (lambda (h) (cons (dom-tag h) (denden--normalise-whitespace (dom-texts h))))
-                      (dom-search dom (lambda (el) (string-match-p (rx bos "h" (any "1-6") eos) (symbol-name (dom-tag el))))))
+                     (dom-search dom (lambda (el) (string-match-p (rx bos "h" (any "1-6") eos) (symbol-name (dom-tag el))))))
    :links (mapcar (lambda (a) (dom-attr a 'href)) (dom-by-tag dom 'a))
    :images (mapcar (lambda (img) (dom-attr img 'src)) (dom-by-tag dom 'img))
    :landmarks (sort (mapcar (lambda (el) (symbol-name (dom-tag el)))
                             (dom-search dom (lambda (el) (memq (dom-tag el) '(nav main header footer aside)))))
-                     #'string-lessp)
+                    #'string-lessp)
    :text (denden--normalise-whitespace (dom-texts dom))))
 
 (defun denden--parse-html-file (file)
@@ -999,18 +1005,22 @@ BASE-URL."
           (file-name-as-directory base-url)))
 
 (defun denden-alias-redirect-html (target-permalink)
-  "Return a noindex, meta-refresh redirect page to TARGET-PERMALINK."
-  (concat
-   "<!doctype html>"
-   (denden-serialize-node
-    (denden-normalise-node
-     (list 'html nil
-           (list 'head nil
-                 (list 'title nil target-permalink)
-                 (list 'link (list :rel "canonical" :href target-permalink))
-                 '(meta (:name "robots" :content "noindex"))
-                 '(meta (:charset "utf-8"))
-                 (list 'meta (list :http-equiv "refresh" :content (format "0; url=%s" target-permalink)))))))))
+  "Return a noindex redirect page to TARGET-PERMALINK, refreshing to its path only."
+  ;; The canonical link stays absolute for search engines; the refresh is
+  ;; root-relative, so a local server keeps the visitor on localhost.
+  (let ((path (or (url-filename (url-generic-parse-url target-permalink)) "/")))
+    (concat
+     "<!doctype html>"
+     (denden-serialize-node
+      (denden-normalise-node
+       (list 'html nil
+             (list 'head nil
+                   (list 'title nil target-permalink)
+                   (list 'link (list :rel "canonical" :href target-permalink))
+                   '(meta (:name "robots" :content "noindex"))
+                   '(meta (:charset "utf-8"))
+                   (list 'meta (list :http-equiv "refresh"
+                                     :content (format "0; url=%s" (if (string-empty-p path) "/" path)))))))))))
 
 ;;;; search-index.json generation
 ;;
@@ -1020,11 +1030,12 @@ BASE-URL."
 
 (defun denden-html-plain-text (html)
   "Return HTML with tags stripped, entities decoded, and whitespace
-collapsed, via a real HTML parse."
+collapsed, via a real HTML parse. Heading # links are dropped."
   (denden--normalise-whitespace
    (dom-inner-text (with-temp-buffer
-                      (insert html)
-                      (libxml-parse-html-region (point-min) (point-max))))))
+                     (insert (replace-regexp-in-string
+                              (rx "<a class=\"heading-anchor\"" (* (not (any ">"))) ">#</a>") "" html))
+                     (libxml-parse-html-region (point-min) (point-max))))))
 
 (defun denden--search-index-sentences (plain-text)
   "Split PLAIN-TEXT into sentences on \".\", \"!\", or \"?\", dropping any 3
@@ -1239,7 +1250,7 @@ live-reload marker."
              (denden-write-livereload-marker denden-publishing-directory)
              (denden-inject-livereload denden-publishing-directory)
              (message "Denden: dev rebuild complete (%s), live-reload marker refreshed"
-                       (file-relative-name file denden-repository-directory))
+                      (file-relative-name file denden-repository-directory))
              (when on-done (funcall on-done)))))
 
 (defvar denden-watch--descriptors nil
@@ -1273,18 +1284,18 @@ fall back to a full rebuild."
   (when denden-watch--timer (cancel-timer denden-watch--timer))
   (setq denden-watch--timer
         (run-at-time denden-watch-debounce-seconds nil
-                      (lambda ()
-                        (let ((files (delete-dups denden-watch--pending-files)))
-                          (setq denden-watch--pending-files nil)
-                          (denden-reload-all)
-                          (if (and denden-build-file-function files
-                                   (seq-every-p #'denden--content-org-file-p files))
-                              (progn
-                                (message "Denden: change detected, rebuilding %d file(s)..."
-                                         (length files))
-                                (dolist (file files) (denden-build-dev-file file)))
-                            (message "Denden: change detected, rebuilding...")
-                            (denden-build-dev t)))))))
+                     (lambda ()
+                       (let ((files (delete-dups denden-watch--pending-files)))
+                         (setq denden-watch--pending-files nil)
+                         (denden-reload-all)
+                         (if (and denden-build-file-function files
+                                  (seq-every-p #'denden--content-org-file-p files))
+                             (progn
+                               (message "Denden: change detected, rebuilding %d file(s)..."
+                                        (length files))
+                               (dolist (file files) (denden-build-dev-file file)))
+                           (message "Denden: change detected, rebuilding...")
+                           (denden-build-dev t)))))))
 
 ;;;###autoload
 (defun denden-watch-start ()
@@ -1439,10 +1450,10 @@ shown in *denden-lint*."
   (let* ((slug (denden-slugify-path title))
          (file (expand-file-name (concat slug ".org") denden-post-directory))
          (template (concat (format denden-new-post-template title
-                                    (format-time-string "%Y-%m-%d")
-                                    (string-join tags " ")
-                                    (if draft "true" "false"))
-                            "%?")))
+                                   (format-time-string "%Y-%m-%d")
+                                   (string-join tags " ")
+                                   (if draft "true" "false"))
+                           "%?")))
     (make-directory (file-name-directory file) t)
     (let ((org-capture-templates
            (list (list "d" "denden new post" 'plain (list 'file file)
