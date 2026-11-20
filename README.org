@@ -37,6 +37,7 @@ directly, not rendered markup.
 - Feeds, sitemap, robots.txt, search index, and OG card generation, all
   included.
 - Callouts: =#+begin_note=, =#+begin_tip= and =#+begin_warn= special blocks render as a labelled =role="note"= box.
+- Backlinks: page metadata records each page's internal links (=:links=, both =[[file:x.org]]= and =[[/path/]]= styles), and =denden-backlinks= returns the pages that link to a given page.
 - Every heading gets a =#= link to its own id at build time.
 
 * Install

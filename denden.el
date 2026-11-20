@@ -108,16 +108,16 @@ alist of (SYMBOL . VALUE)."
 
 (defun denden--escape-text (text)
   "Escape TEXT for use as HTML character data."
-  (let ((text (replace-regexp-in-string "&" "&amp;" text)))
-    (setq text (replace-regexp-in-string "<" "&lt;" text))
-    (setq text (replace-regexp-in-string ">" "&gt;" text))
+  (let ((text (string-replace "&" "&amp;" text)))
+    (setq text (string-replace "<" "&lt;" text))
+    (setq text (string-replace ">" "&gt;" text))
     text))
 
 (defun denden--escape-attribute-value (value)
   "Escape VALUE for use inside a double-quoted HTML attribute."
-  (let ((text (replace-regexp-in-string "&" "&amp;" value)))
-    (setq text (replace-regexp-in-string "\"" "&quot;" text))
-    (setq text (replace-regexp-in-string "<" "&lt;" text))
+  (let ((text (string-replace "&" "&amp;" value)))
+    (setq text (string-replace "\"" "&quot;" text))
+    (setq text (string-replace "<" "&lt;" text))
     text))
 
 (defun denden--serialize-attribute (pair)
@@ -312,7 +312,7 @@ list-item convention."
   "Resolve RAW-PATH, a bare site-root [[/path]] link, against ALL-PAGES's :url
 values. Return the matching page or nil."
   (let ((key (string-trim-left
-              (string-trim-right (string-trim-right raw-path "\\.html\\'") "/")
+              (string-trim-right (string-trim-right raw-path (rx ".html" eos)) "/")
               "/")))
     (seq-find (lambda (p) (equal (string-trim-right (plist-get p :url) "/") key)) all-pages)))
 
@@ -351,10 +351,20 @@ src."
               (match-string 2 whole))))
    html))
 
+(defun denden--enhance-images (html)
+  "HTML with every <img> lazy and async, unless it sets loading itself."
+  (replace-regexp-in-string
+   (rx "<img" (* (not (any ">"))) ">")
+   (lambda (tag)
+     (if (string-search "loading=" tag)
+         tag
+       (concat "<img" (string-trim-right (substring tag 4 -1) (rx (* (any " /"))))
+               " loading=\"lazy\" decoding=\"async\" />")))
+   html t t))
+
 (defun denden--fix-link-html (html)
-  "HTML with both `denden--strip-file-uri-prefix' and
-`denden--escape-attribute-ampersands' applied."
-  (denden--escape-attribute-ampersands (denden--strip-file-uri-prefix html)))
+  "HTML with file: prefixes stripped, ampersands escaped, images enhanced."
+  (denden--enhance-images (denden--escape-attribute-ampersands (denden--strip-file-uri-prefix html))))
 
 (defun denden-link (link contents info)
   "Transcode LINK like `org-html-link', but a resolvable [[/path]] link, or a
@@ -363,7 +373,7 @@ page's live title as text and its real pretty URL as href."
   (let* ((type (org-element-property :type link))
          (raw-path (org-element-property :path link))
          (all-pages (plist-get info :denden-all-pages))
-         (plain-description-p (not (and contents (string-match-p "<" contents)))))
+         (plain-description-p (not (and contents (string-search "<" contents)))))
     (cond
      ((and all-pages (equal type "file") (string-prefix-p "/" raw-path) plain-description-p)
       (let ((target (denden--resolve-site-path raw-path all-pages)))
@@ -455,7 +465,7 @@ no site chrome."
             (hyphenated (replace-regexp-in-string (rx (+ (any " _"))) "-" lower))
             (stripped (replace-regexp-in-string (rx (not (any "a-z0-9-"))) "" hyphenated))
             (collapsed (replace-regexp-in-string (rx (>= 2 "-")) "-" stripped)))
-       (string-trim collapsed "-+" "-+")))
+       (string-trim collapsed (rx (+ "-")) (rx (+ "-")))))
    (split-string relative-path "/") "/"))
 
 (defun denden--pretty-output-relative-path (slugged)
@@ -500,10 +510,10 @@ trailing slash kept."
   "Delete every file under PUB-DIR absent from EXPECTED-FILES, and any
 directory left empty by it."
   (let ((expected (mapcar #'expand-file-name expected-files)))
-    (dolist (file (directory-files-recursively pub-dir ".*" nil))
+    (dolist (file (directory-files-recursively pub-dir (rx (* nonl)) nil))
       (unless (member (expand-file-name file) expected)
         (delete-file file)))
-    (dolist (dir (sort (directory-files-recursively pub-dir ".*" t)
+    (dolist (dir (sort (directory-files-recursively pub-dir (rx (* nonl)) t)
                        (lambda (a b) (> (length a) (length b)))))
       (when (and (file-directory-p dir)
                  (null (directory-files dir nil directory-files-no-dot-files-regexp)))
@@ -602,7 +612,7 @@ syntax). Returns \"\" if ISO-DATE is nil."
 
 (defun denden--relative-path-section (relative-path)
   "Return RELATIVE-PATH's top-level directory, or \"\" if it has none."
-  (if (string-match-p "/" relative-path) (car (split-string relative-path "/")) ""))
+  (if (string-search "/" relative-path) (car (split-string relative-path "/")) ""))
 
 (defun denden--source-section (source base-dir)
   "Return SOURCE's top-level directory relative to BASE-DIR, or \"\" when
@@ -626,10 +636,9 @@ insensitive)."
   "An org-publish :exclude regexp matching every #+draft: t file under
 BASE-DIRECTORY, or nil if there are none."
   (let ((drafts (seq-filter #'denden-file-is-draft-p
-                            (directory-files-recursively base-directory "\\.org\\'"))))
+                            (directory-files-recursively base-directory (rx ".org" eos)))))
     (when drafts
-      (mapconcat (lambda (file) (regexp-quote (file-relative-name file base-directory)))
-                 drafts "\\|"))))
+      (rx-to-string (cons 'or (mapcar (lambda (file) (file-relative-name file base-directory)) drafts)) t))))
 
 (defun denden-sort-pages-by-date-desc (pages)
   "Return PAGES sorted by :date descending; a page with no :date sorts last."
@@ -682,9 +691,11 @@ source file."
         (let ((base-dir (file-name-as-directory (org-publish-property :base-directory project)))
               (pub-dir (file-name-as-directory (org-publish-property :publishing-directory project))))
           (dolist (source (org-publish-get-base-files project))
-            (let* ((keywords (with-temp-buffer
+            (let* ((links nil)
+                   (keywords (with-temp-buffer
                                (insert-file-contents source)
                                (org-mode)
+                               (setq links (denden--internal-link-paths))
                                (org-collect-keywords '("TITLE" "TAGS" "TAGS[]" "REFS" "REFS[]"
                                                        "DATE" "ALIASES" "ALIASES[]"))))
                    (output (denden-output-file-for source project))
@@ -697,10 +708,39 @@ source file."
                           :section (denden--source-section source base-dir)
                           :source source
                           :aliases (denden--list-keyword-value keywords "ALIASES")
+                          :links links
                           :wordcount word-count
                           :readingtime (max 1 (round (/ word-count 200.0))))
                     pages))))))
     (nreverse pages)))
+
+(defun denden--internal-link-paths ()
+  "Return the Org buffer's internal link targets: .org file paths and /site paths."
+  ;; A real parse, so links shown inside src or example blocks do not count.
+  (delete-dups
+   (org-element-map (org-element-parse-buffer) 'link
+     (lambda (link)
+       (let ((path (org-element-property :path link)))
+         (and (equal (org-element-property :type link) "file")
+              (or (string-suffix-p ".org" path) (string-prefix-p "/" path))
+              path))))))
+
+(defun denden--link-points-at-page-p (path linking-page target-page)
+  "Non-nil if PATH, a link written in LINKING-PAGE, points at TARGET-PAGE."
+  (if (string-suffix-p ".org" path)
+      (equal (expand-file-name path (file-name-directory (plist-get linking-page :source)))
+             (plist-get target-page :source))
+    (equal (string-trim (string-trim-right path (rx ".html" eos)) "/" "/")
+           (string-trim (plist-get target-page :url) "/" "/"))))
+
+(defun denden-backlinks (page all-pages)
+  "Return the pages in ALL-PAGES whose internal links point at PAGE, newest first."
+  (denden-sort-pages-by-date-desc
+   (seq-filter (lambda (other)
+                 (and (not (eq other page)) (plist-get other :source)
+                      (seq-some (lambda (path) (denden--link-points-at-page-p path other page))
+                                (plist-get other :links))))
+               all-pages)))
 
 (defun denden-pages-in-section (pages section)
   "Return only the PAGES whose :section is SECTION."
@@ -829,7 +869,7 @@ section."
                       (insert-file-contents file)
                       (org-mode)
                       (org-export-as 'denden-html nil nil t denden-html-default-options)))
-         (split-point (string-match "<div id=\"outline-container-" body-html)))
+         (split-point (string-search "<div id=\"outline-container-" body-html)))
     (if split-point (substring body-html 0 split-point) body-html)))
 
 ;;;; Structural page differ
@@ -1101,7 +1141,7 @@ Emacs."
   (dolist (dir '("denden" "site" "theme"))
     (let ((full-dir (expand-file-name dir denden-repository-directory)))
       (add-to-list 'load-path full-dir)
-      (dolist (file (directory-files full-dir t "\\.el\\'"))
+      (dolist (file (directory-files full-dir t (rx ".el" eos)))
         (load file nil t)))))
 
 ;; Dev-only live reload: `denden-build-dev' rebuilds via `denden-build-
@@ -1201,7 +1241,7 @@ Formatted with title, today's date, space-separated tags, and
 
 (defun denden-inject-livereload (pub-dir)
   "Call `denden-inject-livereload-file' on every .html file under PUB-DIR."
-  (dolist (file (directory-files-recursively pub-dir "\\.html\\'"))
+  (dolist (file (directory-files-recursively pub-dir (rx ".html" eos)))
     (denden-inject-livereload-file file)))
 
 (defconst denden-preview-base-url-envvar "DENDEN_PREVIEW_BASE_URL"
@@ -1388,7 +1428,7 @@ building first."
 shown in *denden-lint*."
   (interactive)
   (let ((problems nil))
-    (dolist (file (directory-files-recursively denden-publishing-directory "\\.html\\'"))
+    (dolist (file (directory-files-recursively denden-publishing-directory (rx ".html" eos)))
       (dolist (problem (denden-lint-file file))
         (push (format "%s: %s" (file-relative-name file denden-publishing-directory) problem) problems)))
     (with-current-buffer (get-buffer-create "*denden-lint*")
@@ -1400,7 +1440,7 @@ shown in *denden-lint*."
 (defun denden-list-drafts ()
   "List every draft post file under `denden-content-directory'."
   (interactive)
-  (let ((files (directory-files-recursively denden-content-directory "\\.org\\'"))
+  (let ((files (directory-files-recursively denden-content-directory (rx ".org" eos)))
         (lines nil))
     (dolist (file files)
       (when (denden-file-is-draft-p file)
@@ -1437,7 +1477,7 @@ shown in *denden-lint*."
          (org-mode)
          (org-collect-keywords '("TAGS" "TAGS[]")))
        "TAGS"))
-    (directory-files-recursively denden-content-directory "\\.org\\'"))))
+    (directory-files-recursively denden-content-directory (rx ".org" eos)))))
 
 (defvar org-capture-templates)
 (declare-function org-capture "org-capture" (&optional goto keys))
