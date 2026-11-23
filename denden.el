@@ -293,7 +293,9 @@ within a denden-html export only."
 never inline style colors."
   (let ((org-html-htmlize-output-type 'css)
         (org-html-htmlize-font-prefix "org-"))
-    (org-html-src-block src-block contents info)))
+    ;; tabindex lets a keyboard scroll a wide block (WCAG 2.1.1).
+    (string-replace "<pre " "<pre tabindex=\"0\" "
+                    (org-html-src-block src-block contents info))))
 
 (defun denden-highlight-stylesheet (class-color-alist)
   "Return a CSS stylesheet string from CLASS-COLOR-ALIST, entries of
