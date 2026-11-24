@@ -1,145 +1,254 @@
-#+TITLE: denden: Org-mode static site generator for Emacs
+#+title: Denden: build a website from Org files
 
-A static site generator for Org mode, built on =ox-publish=. Templates and
-page logic query the real Org AST (=org-element=), not rendered HTML.
+Denden is a small Emacs Lisp library that builds a website from Org files. It uses Org's own export engine for the HTML and Org's element parser for the structure, and adds what a website needs on top: pages with metadata, layouts, a page shell, feeds, a sitemap, pretty URLs and a check of every link.
 
 #+begin_quote
-  This package was written with the help of AI for accomplishing its purpose.
+This package was written with the help of AI for accomplishing its purpose.
 #+end_quote
 
-* Why
+Denden is a library, not a complete site generator. It gives you a few clear Lisp functions and plain data, and you build your site on them as far as you want to take it. A whole blog can be one definition; a large site adds its own layouts and outputs.
 
-Most static site generators parse your content to an HTML string, then hand
-that string plus some metadata to a template. A template that needs real
-structure, a table of contents, an excerpt, a grouped list, has no tree left
-to query. It falls back to regexing the rendered HTML.
+* What it does
 
-denden keeps the real Org AST in scope for the whole build. Templates are
-plain Emacs Lisp lists. Structural queries walk =org-element= nodes
-directly, not rendered markup.
-
-* Features
-
-- AST access from org-element instead of regexp replaces.
-- Templates are plain Emacs Lisp data (=(TAG ATTRS . CHILDREN)=, attributes
-  as a keyword plist). No template language to learn.
-- Async, non-blocking builds via =org-export-async-start=. Incremental
-  rebuilds reuse =ox-publish='s own timestamp cache.
-- A structural differ (compares two rendered pages, ignoring ids, classes,
-  and whitespace) and a permanent accessibility linter: one h1, every image
-  has alt text, no skipped heading levels, every internal link resolves.
-- Base16-ready syntax highlighting via =htmlize=, themeable with CSS custom
-  properties.
-- One =.org= file per post or page. A single-file container convention was
-  tried and reverted for build performance; see =docs/org-migrate-plan.org=
-  for why.
-- Dev-mode live reload and a one-command local preview server.
-- Feeds, sitemap, robots.txt, search index, and OG card generation, all
-  included.
-- Callouts: =#+begin_note=, =#+begin_tip= and =#+begin_warn= special blocks render as a labelled =role="note"= box.
-- Backlinks: page metadata records each page's internal links (=:links=, both =[[file:x.org]]= and =[[/path/]]= styles), and =denden-backlinks= returns the pages that link to a given page.
-- Every heading gets a =#= link to its own id at build time.
+- Reads each Org file once per build, and keeps everything it learns in a page record.
+- Exports each page body once, with Org's HTML backend plus a few changes: stable heading ids, links between pages that show the current title, short labels for bare URLs, callouts, lazy images, code coloured through CSS classes.
+- Renders each page through a layout and a page shell. Templates are plain Lisp lists, such as =(p (:class "note") "Hello")=.
+- Writes feeds, a sitemap, =robots.txt=, redirects for old addresses and, if you want it, a search index.
+- Builds the whole site, clean, every time. It writes the new site next to the old one, checks every internal link, and only then replaces the old site. A failed build leaves the old site as it was.
+- Writes plain, semantic HTML5 with microformats (=h-entry=, =h-feed=) and search engine metadata (Open Graph, JSON-LD) by default.
 
 * Install
 
+Denden needs Emacs 30.1 or later, Org 9.8 or later, and htmlize (for coloured code). It is not in a package archive yet. Install it from its repository:
+
 #+begin_src emacs-lisp
-(add-to-list 'load-path "/path/to/denden")
+(package-vc-install "https://github.com/idlip/denden")
+#+end_src
+
+* A first site
+
+Make a folder with a =content= folder of Org files, and a Lisp file that defines the site:
+
+#+begin_example
+my-site/
+  site.el
+  content/
+    index.org          the home page
+    about.org          a page at /about/
+    blog/
+      _index.org       the blog page at /blog/; it lists the posts
+      first-post.org   a post at /blog/first-post/
+  static/
+    style.css          copied to the site as it is
+#+end_example
+
+=site.el=:
+
+#+begin_src emacs-lisp
 (require 'denden)
+
+(denden-define-site my-site
+  "My personal site."
+  :title "My site"
+  :base-url "https://example.org/"
+  :author "Jane Doe"
+  :menu '(("Home" . "/") ("Blog" . "/blog/") ("About" . "/about/"))
+  :stylesheets '("/style.css"))
 #+end_src
 
-
-* Setup
-
-A site layer sets these before calling any denden command:
-
-#+begin_src emacs-lisp
-(setq denden-content-directory "/path/to/your/content")
-(setq denden-publishing-directory "/path/to/your/output")
-(setq denden-project-root-directory "/path/to/your/site")
-(setq denden-full-build-function #'your-site-build)
-(setq denden-build-function #'your-site-build-async)
-#+end_src
-
-Optional, only needed for =M-x denden-new='s post-capture flow:
-
-#+begin_src emacs-lisp
-(setq denden-post-directory "/path/to/your/content/posts")
-#+end_src
-
-You also register your own =org-publish-project-alist= entry. Point
-=:publishing-function= at your site's own page-dispatch function. See
-=site/site.el='s "org-publish project definition" section for the pattern
-to copy.
-
-* Usage
-
-All through =M-x= once loaded:
-
-- ~denden-preview-current-file~: rebuild the file you are editing and open
-  or refresh it in a browser. The everyday command while writing. The
-  first call starts the preview server and opens the tab; every later call
-  just rebuilds and lets live reload refresh it.
-- ~denden-build~: build the whole site, using the cache. Skips unchanged
-  pages.
-- ~denden-clean-build~: wipe the cache, rebuild everything.
-- ~denden-build-serve~: build, then serve via ~denden-preview-command~
-  (default a plain HTTP server).
-- ~denden-clean~: delete the publishing directory outright. No rebuild.
-- ~denden-lint~: run the accessibility and structure linter over the
-  current build. Results go to =*denden-lint*=.
-- ~denden-list-drafts~: list every =#+draft: t= post in =*denden-drafts*=.
-- ~denden-diff~: structurally diff two rendered HTML files. A debugging
-  aid.
-- ~denden-new~: create a post. Prompts for a title and tags with
-  completion, then writes a new file under =denden-post-directory=.
-- ~denden-reload-all~: reload denden, site, and theme fresh from disk,
-  without restarting Emacs.
-- ~denden-watch-start~ / ~denden-auto-rebuild-mode~: watch content and
-  config for changes, then rebuild automatically with live reload.
-- ~denden-find~ / ~denden-site~: project-aware find-file and switch-project,
-  scoped to your repository root.
-
-* Writing
-
-Posts are plain Org. Two conventions on top:
-
-Callouts are Org special blocks of type =note=, =tip= or =warn=. Org formatting works inside.
+A post:
 
 #+begin_src org
-,#+begin_note
-Denden builds one =.org= file per page.
-,#+end_note
+,#+title: First post
+,#+date: [2026-01-08 Thu]
+,#+tags: emacs org
 
-,#+begin_warn
-A *clean build* wipes the cache first.
-,#+end_warn
+Hello. See the [[file:../about.org][about page]].
 #+end_src
 
-Each renders as a =div.callout= with =role="note"=, a =data-callout= of its type, and a visible label paragraph first (Note, Tip, Warning), so the type never depends on colour alone. Style them through =[role="note"]= and =[data-callout]=. Any other special block type falls back to Org's default rendering. The types and labels live in =denden-callout-types=.
+Load =site.el= and run =M-x denden-build=. The site is written to =public/= next to =site.el=. Look at it with any static file server, for example =static-web-server --root public/ --port 7777 --page404 404.html=.
 
-Heading links need nothing from the author: every heading ends with =<a class="heading-anchor" href="#id">#</a>=.
+The folder [[file:example/README.org][example/]] in this repository is a complete small blog in this shape.
 
-* Example
+* How a build works
 
-=example/= is the smallest real site built on this library: a home
-page, an about page, a blog listing, and a few posts, styled after
-[[https://github.com/janraasch/hugo-bearblog/][Hugo Bear Blog]]. See
-=example/README.org=.
+1. Collect :: every =.org= file under the content folder is read once and becomes a page record. Files and folders whose names start with a dot are skipped, and so are drafts (=#+draft: t=) unless =denden-include-drafts= is non-nil.
+2. Export :: every page body is exported to HTML, once, from the text read in step 1. The export records each page's links.
+3. Render :: each page goes through its layout and the site's page shell, and becomes HTML text. Each output function adds its files, such as the feed.
+4. Write :: everything is written into a new folder next to the publishing folder, after the static folder is copied there.
+5. Check :: every internal link must point to a file the build wrote. =denden-broken-link-action= says whether a broken link shows a message or stops the build.
+6. Replace :: the new folder replaces the old site. If anything fails before this step, the new folder is removed and the old site stays.
 
-[[./example/screenshot.png]]
+A page's address comes from its file: =blog/My Post.org= becomes =/blog/my-post/=, =blog/_index.org= becomes =/blog/=, and =index.org= at the top is the home page.
 
-* Roadmap
+* Writing pages
 
-- [X] SEO meta (description, canonical, OG/Twitter tags, JSON-LD) wired
-  into the generated =<head>=.
-- [ ] A real asset pipeline (concat, minify, fingerprint, SRI).
-- [ ] CI and deploy.
+Denden reads these keywords:
 
-* References
+| Keyword                             | Use                                                                            |
+|-------------------------------------+--------------------------------------------------------------------------------|
+| =#+title:=                            | The page title. Without it, the file name                                      |
+| =#+date:=                             | The date, such as =[2026-01-08 Thu]=. A date that does not exist stops the build |
+| =#+description:=                      | The description for search engines and feeds. Without it, the first paragraphs |
+| =#+layout:=                           | The layout that renders the page (see Layouts)                                 |
+| =#+draft: t=                          | Leave the page out of a normal build                                           |
+| =#+aliases:=                          | Old addresses, such as =posts/old-name=, that redirect here                      |
+| =#+tags:=                             | Terms of a taxonomy; the site's =:taxonomies= says which keywords these are      |
+| =#+author:=, =#+language:=, =#+subtitle:= | Override the site's author and language for this page; show a subtitle         |
 
-- [[https://orgmode.org/worg/dev/org-export-reference.html][Org export reference]]. The =ox-*= API denden's backend is built on.
-  full design history and every settled decision behind denden's shape.
+Any other keyword is kept in the page's =meta= plist, so your own templates can read it: =#+chip_color: teal= gives =(plist-get (denden-page-meta page) :chip-color)=.
 
-* License
+Links between pages can be written as =[[file:other.org]]= or =[[/blog/other/]]=. Both point to the page's address and show its current title, unless the link's description has markup. Links to files in the static folder, such as =[[/images/cat.png]]=, are left as they are.
 
-MIT. See [[file:../LICENSE][LICENSE]].
+A special block whose type is one of the site's =:callout-types=, such as =#+begin_note=, becomes a labelled note.
+
+Code blocks run while a page exports only when the site sets =:evaluate-code t=; only set it for content you wrote. While a page exports, code can read =denden-current-site=, =denden-current-page= and =denden-current-pages=, for example to list the newest posts on the home page.
+
+* The site definition
+
+=denden-define-site= takes a name, a docstring and these fields. Every field has a default.
+
+| Field                 | Default                                      | Meaning                                                                                         |
+|-----------------------+----------------------------------------------+-------------------------------------------------------------------------------------------------|
+| =:title=                | ="My site"=                                    | Title in the page shell and feeds                                                               |
+| =:base-url=             | ="https://example.org/"=                       | The site's address. The environment variable =DENDEN_PREVIEW_BASE_URL= overrides it, for previews |
+| =:description=          | =""=                                           | Feed subtitle                                                                                   |
+| =:author=               | =user-full-name=                               | Author in feeds and metadata                                                                    |
+| =:language=             | ="en"=                                         | Language of the pages                                                                           |
+| =:root-directory=       | the folder of the file that defines the site | The folder the next three are relative to                                                       |
+| =:content-directory=    | ="content"=                                    | The Org files                                                                                   |
+| =:static-directory=     | ="static"=                                     | Files copied as they are                                                                        |
+| =:publishing-directory= | ="public"=                                     | Where the site is written                                                                       |
+| =:taxonomies=           | ='("tags")=                                    | Keywords whose values are terms                                                                 |
+| =:layouts=              | =nil=                                          | Alist of (LAYOUT . FUNCTION), see Layouts                                                       |
+| =:default-layout=       | =denden-render-plain-page=                     | Layout of pages without a known =#+layout:=                                                       |
+| =:page-shell=           | =denden-default-page-shell=                    | See The page shell                                                                              |
+| =:outputs=              | feed, term pages, sitemap, robots, redirects | See Outputs                                                                                     |
+| =:menu=                 | =nil=                                          | Header links of the default page shell, as (LABEL . URL)                                        |
+| =:stylesheets=          | =nil=                                          | Style sheets the default page shell links                                                       |
+| =:feed-entry-count=     | =20=                                           | Entries in the feed; nil for all                                                                |
+| =:link-label-rules=     | =nil=                                          | (REGEXP . REPLACEMENT) rules for bare URL labels                                                |
+| =:callout-types=        | note, tip, warn                              | Alist of (TYPE . LABEL) for callouts                                                            |
+| =:evaluate-code=        | =nil=                                          | Run code blocks while exporting                                                                 |
+
+=M-x denden-build= asks which defined site to build, or builds the only one. From Lisp or a batch Emacs, call =(denden-build my-site)=.
+
+* Options
+
+Options (=M-x customize-group RET denden=) are small preferences that are not about one site.
+
+| Option                      | Default                | Meaning                                                     |
+|-----------------------------+------------------------+-------------------------------------------------------------|
+| =denden-include-drafts=       | =nil=                    | Build drafts too                                            |
+| =denden-broken-link-action=   | =warn=                   | =warn= or =error= for a link to nothing                         |
+| =denden-lastmod-from-git=     | =t=                      | Take last-modified dates from git                           |
+| =denden-heading-anchor-text=  | ="#"=                    | Text of the link after each heading; nil for none           |
+| =denden-heading-anchor-label= | ="Link to this section"= | Its name for screen readers                                 |
+| =denden-code-highlighting=    | =css=                    | =css= classes, =inline-css= (your Emacs theme's colours) or nil |
+| =denden-figure-numbers=       | =t=                      | "Figure 1:" before image captions                           |
+| =denden-lazy-images=          | =t=                      | Images load when they come near the screen                  |
+| =denden-page-title-format=    | ="%s \vert{} %s"=              | Browser tab title: page, then site                          |
+| =denden-date-format=          | ="%F"=                   | Dates shown on pages                                        |
+| =denden-excerpt-paragraphs=   | =2=                      | Paragraphs in an excerpt                                    |
+
+With =css= highlighting, colour the classes with a style sheet. =M-x org-html-htmlize-generate-css= makes one from your current Emacs theme.
+
+* Templates
+
+A template is a Lisp list =(TAG ATTRIBUTES . CHILDREN)=. ATTRIBUTES is a keyword plist such as =(:class "note")=, or nil. A child is a string (escaped), another node, or nil (skipped, so =(when CONDITION NODE)= works inside a template). =(raw-html nil STRING)= puts STRING in the page as it is, for exported bodies and scripts. =denden-serialize-node= turns a node into HTML:
+
+#+begin_src emacs-lisp
+(denden-serialize-node '(p (:class "note") "Hello " (b nil "you")))
+;; => "<p class=\"note\">Hello <b>you</b></p>"
+#+end_src
+
+Backquote makes templates easy to read:
+
+#+begin_src emacs-lisp
+(defun my-post-row (page)
+  "Return one list row for PAGE."
+  `(li nil
+       ,(denden-date-node (denden-page-date page))
+       " "
+       (a (:href ,(concat "/" (denden-page-url page))) ,(denden-page-title page))))
+#+end_src
+
+* Layouts
+
+A layout is a function of the site, the page and all pages, which returns the node of the page's main part. =#+layout: talk= in a page uses the function the site lists for ="talk"=:
+
+#+begin_src emacs-lisp
+(defun my-talk-layout (_site page _pages)
+  "Return the main part of the talk PAGE."
+  `(article (:class "h-entry talk")
+     (h1 (:class "p-name") ,(denden-page-title page))
+     (p nil "Slides: " ,(plist-get (denden-page-meta page) :slides))
+     (div (:class "e-content") (raw-html nil ,(denden-page-body page)))))
+
+(denden-define-site my-site
+  "My site."
+  :layouts '(("talk" . my-talk-layout)))
+#+end_src
+
+The default layout, =denden-render-plain-page=, shows the title, subtitle, date, terms (such as tags, as =p-category= links) and body as an =h-entry=. On a section's index page, such as =/blog/=, it then lists the section's other pages, newest first.
+
+* The page shell
+
+The page shell is a function of the site, the page, the main part and all pages, which returns the whole =html= node. The default, =denden-default-page-shell=, writes the character set, the viewport, the title, =denden-seo-head-nodes=, the feed link and the site's style sheets, then a header with the site's menu, the main part, and a footer with the author as an =h-card= and a link to the feed. Give the site your own shell for anything more:
+
+#+begin_src emacs-lisp
+(defun my-page-shell (site page main _pages)
+  "Return the whole page of PAGE of SITE around MAIN."
+  `(html (:lang ,(denden-page-language site page))
+     (head nil
+       (meta (:charset "utf-8"))
+       (title nil ,(denden-page-title page))
+       ,@(denden-seo-head-nodes site page))
+     (body nil (main nil ,main) (footer nil "Made with Denden"))))
+#+end_src
+
+* Outputs
+
+An output function takes the site and all pages and returns a list of (URL . TEXT): extra files for the site. The defaults are =denden-feed-output= (=feed.xml=), =denden-term-outputs= (a page per taxonomy, such as =/tags/=, and per term, such as =/tags/emacs/=), =denden-sitemap-output=, =denden-robots-output= and =denden-redirect-outputs=. =denden-search-index-output= is there too, but not on by default. Bodies are exported before outputs run, so an output can use them.
+
+#+begin_src emacs-lisp
+(defun my-now-feed (site pages)
+  "Return a feed of the pages of PAGES tagged now."
+  (list (cons "now.xml"
+              (denden-atom-feed site (denden-sort-pages-by-date
+                                      (denden-pages-with-term pages "tags" "now"))
+                                :title "Now"))))
+
+(denden-define-site my-site
+  "My site."
+  :outputs (list #'denden-feed-output #'denden-sitemap-output
+                 #'denden-robots-output #'denden-redirect-outputs
+                 #'my-now-feed))
+#+end_src
+
+An output may replace a static file of the same name; the build says so. Two outputs or pages with the same address stop the build.
+
+* Functions
+
+Every =denden-= function and variable is public; =denden--= ones are private and may change.
+
+- Sites :: =denden-define-site=, =denden-site-create=, =denden-base-url=, =denden-build=.
+- Pages :: =denden-collect-pages=, =denden-page-for-source=, =denden-page-permalink=, =denden-page-excerpt=, =denden-page-author=, =denden-page-language=, =denden-page-taxonomy-terms=, and the record fields =denden-page-url=, =-title=, =-date=, =-lastmod=, =-description=, =-section=, =-layout=, =-aliases=, =-links=, =-external-links=, =-body=, =-meta=.
+- Lists of pages :: =denden-sort-pages-by-date=, =denden-sort-pages-by-title=, =denden-pages-in-section=, =denden-sections=, =denden-section-index-p=, =denden-pages-with-term=, =denden-term-counts=, =denden-group-pages-by-year=, =denden-backlinks=, =denden-previous-and-next=.
+- Export :: =denden-export-page=, =denden-export-org-string=, =denden-export-org-strings= (many short pieces in one export), =denden-html-plain-text=, =denden-heading-id=, =denden-link-label=.
+- Rendering :: =denden-serialize-node=, =denden-render-page=, =denden-render-site=, =denden-render-plain-page=, =denden-render-page-list=, =denden-render-terms=, =denden-term-url=, =denden-date-node=, =denden-default-page-shell=, =denden-seo-head-nodes=.
+- Outputs :: =denden-term-outputs=, =denden-atom-feed=, =denden-sitemap-xml=, =denden-robots-txt=, =denden-redirect-html=, =denden-search-index-json=, and the =-output= functions above.
+
+Each has a docstring: =C-h f=.
+
+* Previewing
+
+Any static file server shows the built site. For a preview, set =DENDEN_PREVIEW_BASE_URL= to the server's address, so canonical links and feeds point at it, and bind =denden-include-drafts= to t:
+
+#+begin_src sh
+DENDEN_PREVIEW_BASE_URL=http://localhost:7777/ \
+  emacs --batch -l site.el --eval '(setq denden-include-drafts t)' --eval '(denden-build my-site)'
+static-web-server --root public --port 7777
+#+end_src
+
+Watch for changes with any file watcher, such as =watchexec=, that runs the same build.
