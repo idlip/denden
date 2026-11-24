@@ -1,0 +1,23 @@
+#+title: Third
+#+date: [2025-03-01 Sat]
+#+tags: org
+
+* Getting started
+See [[file:second.org]] and [[file:second.org][*bold* words]] and [[/log/first-post/]].
+A static file: [[/images/cat.png]].
+A bare URL: https://www.example.org/docs/ and [[https://example.org/a][a site]].
+A missing page: [[file:nowhere.org]].
+
+#+caption: A cat
+[[file:/images/cat.png]]
+
+* Getting started
+- [X] done
+
+#+begin_note
+Mind the gap.
+#+end_note
+
+#+begin_src emacs-lisp
+(message "hi")
+#+end_src

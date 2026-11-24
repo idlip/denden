@@ -1,0 +1,12 @@
+#+title: First Post
+#+date: [2024-02-03 Sat]
+#+tags: emacs org
+#+aliases: posts/first
+#+description: The first one.
+#+no_comment: t
+
+Text.
+
+#+begin_src org
+,#+title: Not a title
+#+end_src
