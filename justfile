@@ -1,25 +1,41 @@
-# denden's own tasks (the example site). Run `just` from denden/ to list.
+# Denden's own tasks, on the example site. Run `just` to list them.
 
-example_pub := "example/public"
-example_elisp := "-Q -L . -l denden.el -l example/example-theme.el -l example/example-site.el"
+public := "example/public"
+port := "7777"
+remote := "idlip"
+example := "emacs --batch -Q -L . -L example -l example/example-site.el"
 
 # Build the example site into example/public/.
-example-build:
-    emacs --batch {{example_elisp}} --eval '(example-build t)'
+build:
+    {{example}} --eval '(denden-build example-site)'
 
-# Build, then serve example/public/ locally: static-web-server, real or via `nix run`.
-example-serve: example-build
+# Serve example/public/ at http://localhost:7777. Run it in its own terminal.
+web:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd {{example_pub}}
-    if command -v static-web-server >/dev/null 2>&1; then
-        static-web-server --port 8000 --page404 404.html
-    elif command -v nix >/dev/null 2>&1; then
-        nix run nixpkgs#static-web-server -- --port 8000 --page404 404.html
+    if command -v static-web-server >/dev/null; then
+        static-web-server --root {{public}} --port {{port}}
     else
-        python3 -m http.server 8000
+        nix run nixpkgs#static-web-server -- --root {{public}} --port {{port}}
     fi
 
-# Delete the example's build output.
-example-clean:
-    rm -rf {{example_pub}}
+# Build, then publish the example on the gh-pages branch (https://denden.idlip.in/).
+deploy: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    worktree=.gh-pages-worktree
+    if ! git show-ref --verify --quiet refs/heads/gh-pages; then
+        # The first deploy starts gh-pages as an empty branch of its own.
+        git branch gh-pages "$(git commit-tree "$(git hash-object -t tree /dev/null)" -m "gh-pages")"
+    fi
+    [ -d "$worktree" ] || git worktree add "$worktree" gh-pages
+    # Exclude .git, not .git/: in a worktree, .git is a file.
+    rsync -a --delete --exclude .git {{public}}/ "$worktree"/
+    cd "$worktree"
+    git add -A
+    if git diff --cached --quiet; then
+        echo "deploy: nothing changed"
+    else
+        git commit -m "deploy $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        git push {{remote}} gh-pages --force
+    fi
