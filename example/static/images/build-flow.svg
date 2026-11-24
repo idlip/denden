@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 120" width="640" height="120" font-family="system-ui, sans-serif" font-size="16">
+  <rect width="640" height="120" fill="#1e1e1e" rx="8"/>
+  <g fill="none" stroke="#79a8ff" stroke-width="2">
+    <rect x="20" y="40" width="120" height="40" rx="6"/>
+    <rect x="190" y="40" width="120" height="40" rx="6"/>
+    <rect x="360" y="40" width="120" height="40" rx="6"/>
+    <rect x="530" y="40" width="90" height="40" rx="6"/>
+    <path d="M140 60h50M310 60h50M480 60h50"/>
+  </g>
+  <g fill="#ffffff" text-anchor="middle">
+    <text x="80" y="65">Org files</text>
+    <text x="250" y="65">pages</text>
+    <text x="420" y="65">HTML</text>
+    <text x="575" y="65">site</text>
+  </g>
+</svg>

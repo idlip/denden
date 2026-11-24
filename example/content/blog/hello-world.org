@@ -1,5 +1,6 @@
 #+title: Hello, World
 #+date: [2026-01-08 Thu]
+#+tags: meta
 
 A first post. Nothing fancy: a paragraph, then a list.
 

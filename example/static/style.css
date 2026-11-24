@@ -1,26 +1,10 @@
 :root {
   --width: 700px;
   --font-main: system-ui, sans-serif;
-  --background-color: #fff;
-  --heading-color: #222;
-  --text-color: #444;
-  --link-color: #2f5fd0;
-  --visited-color: #7c5bc4;
-  --blockquote-color: #666;
-  --border-color: #ddd;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background-color: #10151a;
-    --heading-color: #eee;
-    --text-color: #ccc;
-    --link-color: #8cbaf0;
-    --visited-color: #b39ce6;
-    --blockquote-color: #999;
-    --border-color: #333;
-  }
-}
+/* Colours come from modus.css, which the build makes from Emacs's
+   Modus Vivendi theme. */
 
 body {
   font-family: var(--font-main);
@@ -60,12 +44,39 @@ header {
   margin-bottom: 2rem;
 }
 
-header .title h2 {
-  margin: 0;
+header > a:first-child {
+  color: var(--heading-color);
+  font-size: 1.5rem;
+  font-weight: bold;
 }
 
 header nav a {
   margin-right: 1rem;
+}
+
+.heading-anchor {
+  margin-left: 0.4em;
+  color: var(--blockquote-color);
+  text-decoration: none;
+}
+
+/* Show the # link only when the heading is hovered or the link has
+   keyboard focus; screens without hover show it faintly. */
+@media (hover: hover) {
+  .heading-anchor {
+    opacity: 0;
+  }
+
+  :is(h1, h2, h3, h4, h5, h6):hover .heading-anchor,
+  .heading-anchor:focus-visible {
+    opacity: 1;
+  }
+}
+
+@media (hover: none) {
+  .heading-anchor {
+    opacity: 0.4;
+  }
 }
 
 time {
@@ -90,6 +101,16 @@ pre {
   padding: 0.75rem;
   border: 1px solid var(--border-color);
   border-radius: 4px;
+  background-color: var(--background-dim);
+}
+
+figure {
+  margin: 1.5rem 0;
+}
+
+figcaption {
+  color: var(--blockquote-color);
+  font-size: 0.9em;
 }
 
 img {
@@ -107,6 +128,25 @@ th, td {
   text-align: left;
 }
 
+th {
+  background-color: var(--background-dim);
+}
+
+.terms a {
+  color: var(--accent-color);
+  margin-right: 0.5rem;
+}
+
+footer {
+  border-top: 1px solid var(--border-color);
+  margin-top: 3rem;
+  padding-top: 1rem;
+  font-size: 0.9em;
+  color: var(--blockquote-color);
+  display: flex;
+  justify-content: space-between;
+}
+
 .callout {
   border-left: 3px solid var(--border-color);
   padding: 0.75rem 1rem;
@@ -114,15 +154,15 @@ th, td {
   border-radius: 0 4px 4px 0;
 }
 
-.callout-note {
+.callout[data-callout="note"] {
   border-left-color: var(--link-color);
 }
 
-.callout-tip {
+.callout[data-callout="tip"] {
   border-left-color: #4caf7d;
 }
 
-.callout-warn {
+.callout[data-callout="warn"] {
   border-left-color: #d08a3e;
 }
 
@@ -143,24 +183,16 @@ th, td {
   }
 }
 
-footer {
-  border-top: 1px solid var(--border-color);
-  margin-top: 3rem;
-  padding-top: 1rem;
-  font-size: 0.9em;
-  color: var(--blockquote-color);
-}
-
-ul.blog-posts {
+ul.h-feed {
   list-style: none;
   padding: 0;
 }
 
-ul.blog-posts li {
+ul.h-feed li {
   display: flex;
   gap: 1rem;
 }
 
-ul.blog-posts li span {
+ul.h-feed li time {
   flex: 0 0 7.5rem;
 }

@@ -8,6 +8,8 @@ This package was written with the help of AI for accomplishing its purpose.
 
 Denden is a library, not a complete site generator. It gives you a few clear Lisp functions and plain data, and you build your site on them as far as you want to take it. A whole blog can be one definition; a large site adds its own layouts and outputs.
 
+Demo: https://denden.idlip.in/ is the example site in =example/=, built with Denden.
+
 * What it does
 
 - Reads each Org file once per build, and keeps everything it learns in a page record.

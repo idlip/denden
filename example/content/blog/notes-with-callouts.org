@@ -1,0 +1,40 @@
+#+title: Notes, Tables and Footnotes
+#+date: [2026-03-20 Fri]
+#+tags: org writing
+#+description: What a few more Org features look like on the page: callouts, a table, a quote and footnotes.
+
+Org has more than paragraphs and lists. Here is how a few of its other pieces come out of the default layout.
+
+* Callouts
+
+#+begin_note
+A note block becomes a labelled callout. The site decides which block types are callouts.
+#+end_note
+
+#+begin_tip
+Write the block in Org as =#+begin_tip= and =#+end_tip=.
+#+end_tip
+
+#+begin_warn
+Callouts are for asides. A page made of them is hard to read.
+#+end_warn
+
+* A table
+
+| Piece      | Org writes        | The page shows      |
+|------------+-------------------+---------------------|
+| Heading    | =* Title=         | an =h2= with a link |
+| Emphasis   | =*bold*=, =/italic/= | *bold*, /italic/  |
+| Code       | =~code~=          | ~code~              |
+
+* A quote and footnotes
+
+#+begin_quote
+Plain text will never go out of style.
+#+end_quote
+
+Footnotes collect at the end of the post[fn:1], each with a link back to where it was used[fn:2].
+
+[fn:1] Like this one.
+
+[fn:2] And this one.

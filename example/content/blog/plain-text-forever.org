@@ -1,5 +1,6 @@
 #+title: Plain Text, Forever
 #+date: [2026-02-14 Sat]
+#+tags: writing org
 
 Bear Blog's whole pitch is that a post can be small: no tracking, no
 bloat, a page that loads before you have finished clicking. That's a

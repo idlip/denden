@@ -1,5 +1,7 @@
 #+title: An Org-Mode Tour
 #+date: [2026-03-02 Mon]
+#+tags: org emacs
+#+macro: sidenote @@html:<aside class="sidenote">@@$1@@html:</aside>@@
 
 A longer post, mostly as a tour of what plain Org gives you for free once
 it goes through the =denden-html= backend: *bold*, /italic/, ~code~,

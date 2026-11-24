@@ -1,30 +1,17 @@
-#+TITLE: denden example: a Bear-Blog-style site
+#+title: Denden example: a small blog
 
-The smallest real site denden.el can build: a home page, an about page,
-a blog listing, and a few posts. One stylesheet, no JavaScript, no tags
-or taxonomy pages. Inspired by
-https://github.com/janraasch/hugo-bearblog/, not a port of it.
+A small real site built with Denden: a home page, an about page, a blog with tags, and a few posts that show what Org gives you (code, callouts, a table, footnotes, a figure). The site is one =denden-define-site= form in =example-site.el=, plus one output of its own. Denden's default layout and page give the markup; =static/style.css= gives the layout, in the spirit of [[https://bearblog.dev/][Bear Blog]]; and the colours, of the page and of its code, come from Emacs's own Modus Vivendi theme.
 
-[[./screenshot.png]]
+Live demo: https://denden.idlip.in/
 
 * Files
 
-- =example-site.el= :: content/publishing directories, the org-publish
-  project, page dispatch, and the build entry points. The contract
-  =denden/README.org= describes, filled in for a real (if tiny) site.
-- =example-theme.el= :: the sexp-HTML templates: page skeleton, single
-  post, post list.
-- =example-async-init.el= :: the child-process init file for
-  =example-build-async=, same reasoning as =denden/denden-async-init.el=.
-- =content/= :: the site's own content. =_index.org= is the home page,
-  =about.org= a plain page, =blog/= the posts plus their own
-  =_index.org= listing.
-- =assets/style.css= :: the whole stylesheet.
+- =example-site.el= :: the site definition, and =example-site-modus-css-output=, which writes =modus.css= from the Modus Vivendi palette (=modus-themes-get-color-value=). The theme is loaded but never enabled, so a build does not change your Emacs.
+- =static/style.css= :: the layout. Files in =static/= are copied to the site as they are.
+- =content/= :: the pages. =_index.org= is the home page, =about.org= a plain page, and =blog/= holds the posts. =blog/_index.org= is the blog page; Denden lists the posts under it, newest first.
 
 * Building
 
-From =denden/=: =just example-build= (or =just example-serve= to also
-preview it). From Emacs, once =example-site.el= is loaded:
-=M-x denden-build=, =denden-build-serve=, =denden-preview-current-file=,
-and the rest of denden's own command surface all work as documented in
-=denden/README.org=.
+From the =denden= folder: =just build= writes the site to =example/public/=, =just web= serves it at http://localhost:7777, and =just deploy= publishes it to the repository's =gh-pages= branch, which GitHub Pages serves at https://denden.idlip.in/ (the domain is in =static/CNAME=). From Emacs, load =example-site.el= and run =M-x denden-build=.
+
+To change the look, edit =static/style.css=, choose other Modus colours in =example-site-colors= and =example-site-code-colors= (or another Modus theme), list other style sheets in =:stylesheets=, or give the site a =:page-shell= of your own.
