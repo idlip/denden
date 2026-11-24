@@ -1,0 +1,18 @@
+#+title: Denden news
+
+* 0.1.0 (2026-11-24)
+
+Denden was rebuilt from scratch as a small library. Everything below is new or changed from the earlier, unreleased engine.
+
+- A site is one =denden-define-site= form, a =denden-site= record with defaults for every field. =M-x denden-build= builds a defined site.
+- Pages are =denden-page= records. Each Org file is read once per build; keywords Denden does not use go to the page's =meta= plist.
+- Every build is full and clean: the new site is written next to the old one, its links are checked, and only then does it replace the old site. ox-publish and its timestamps are no longer used.
+- Layouts (=:layouts=, =:default-layout=), a page shell (=:page-shell=) and output functions (=:outputs=) are plain functions in the site definition. Render functions return text and never write files.
+- The default layout and page shell write semantic HTML5 with microformats and search engine metadata, and a section's index page lists its pages.
+- Outputs: an Atom feed, pages for each taxonomy and term, a sitemap, =robots.txt=, redirects for aliases and a search index.
+- The default page shows a page's terms as category links, and has a footer with the author as an h-card and a feed link.
+- Every internal link is checked after each build (=denden-broken-link-action=).
+- New options for small touches: =denden-heading-anchor-text=, =denden-heading-anchor-label=, =denden-code-highlighting=, =denden-figure-numbers=, =denden-lazy-images=, =denden-page-title-format=, =denden-date-format=, =denden-excerpt-paragraphs=.
+- Code blocks run only when the site sets =:evaluate-code=, and can read =denden-current-site=, =denden-current-page= and =denden-current-pages=.
+- Removed from the package: the preview server, live reload, the file watcher, the new-post command, the page differ and the linter command. Use a static file server, a file watcher and your own capture template; the linter's checks are tests.
+- Needs Emacs 30.1 and Org 9.8.
