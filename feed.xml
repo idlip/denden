@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>A Plain Blog</title><subtitle>A minimal blog built with Denden.</subtitle><link rel="alternate" type="text/html" href="https://denden.idlip.in/" /><link rel="self" type="application/atom+xml" href="https://denden.idlip.in/feed.xml" /><id>https://denden.idlip.in/feed.xml</id><updated>2026-11-24T00:00:00Z</updated><author><name>Jane Doe</name></author><generator>Denden</generator><entry><title>A Picture and Some Code</title><link rel="alternate" type="text/html" href="https://denden.idlip.in/blog/a-picture-and-some-code/" /><id>https://denden.idlip.in/blog/a-picture-and-some-code/</id><published>2026-04-02T00:00:00Z</published><updated>2026-11-24T00:00:00Z</updated><category term="emacs" label="emacs" scheme="https://denden.idlip.in/tags/"></category><category term="code" label="code" scheme="https://denden.idlip.in/tags/"></category><summary>A figure with a caption, and code coloured by the same theme as the rest of the site. The first post, Hello, World, has the plain version.</summary><content type="html">&lt;p&gt;
+A figure with a caption, and code coloured by the same theme as the rest of the site. The first post, &lt;a href=&quot;/blog/hello-world/&quot;&gt;Hello, World&lt;/a&gt;, has the plain version.
+&lt;/p&gt;
+
+
+&lt;figure id=&quot;orgbe75b0c&quot;&gt;
+&lt;img src=&quot;/images/build-flow.svg&quot; alt=&quot;Four boxes in a row joined by arrows: Org files, pages, HTML, site.&quot; class=&quot;org-svg&quot; loading=&quot;lazy&quot; decoding=&quot;async&quot;&gt;
+
+&lt;figcaption&gt;&lt;span class=&quot;figure-number&quot;&gt;Figure 1: &lt;/span&gt;How a build goes: Org files become pages, pages become HTML, HTML becomes the site.&lt;/figcaption&gt;
+&lt;/figure&gt;
+&lt;div id=&quot;outline-container-some-emacs-lisp&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;some-emacs-lisp&quot;&gt;Some Emacs Lisp&lt;a class=&quot;heading-anchor&quot; href=&quot;#some-emacs-lisp&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-some-emacs-lisp&quot;&gt;
+&lt;div class=&quot;org-src-container&quot;&gt;
+&lt;pre tabindex=&quot;0&quot; class=&quot;src src-emacs-lisp&quot;&gt;&lt;code&gt;(&lt;span class=&quot;org-keyword&quot;&gt;defun&lt;/span&gt; &lt;span class=&quot;org-function-name&quot;&gt;example-greeting&lt;/span&gt; (name)
+  &lt;span class=&quot;org-doc&quot;&gt;&quot;Return a greeting for NAME.&quot;&lt;/span&gt;
+  &lt;span class=&quot;org-comment-delimiter&quot;&gt;;; &lt;/span&gt;&lt;span class=&quot;org-comment&quot;&gt;Strings, keywords and comments each get their colour.
+&lt;/span&gt;  (format &lt;span class=&quot;org-string&quot;&gt;&quot;Hello, %s!&quot;&lt;/span&gt; name))
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-and-a-shell-command&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;and-a-shell-command&quot;&gt;And a shell command&lt;a class=&quot;heading-anchor&quot; href=&quot;#and-a-shell-command&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-and-a-shell-command&quot;&gt;
+&lt;div class=&quot;org-src-container&quot;&gt;
+&lt;pre tabindex=&quot;0&quot; class=&quot;src src-sh&quot;&gt;&lt;code&gt;just example-build &amp;amp;&amp;amp; just example-serve
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+</content></entry><entry><title>Notes, Tables and Footnotes</title><link rel="alternate" type="text/html" href="https://denden.idlip.in/blog/notes-with-callouts/" /><id>https://denden.idlip.in/blog/notes-with-callouts/</id><published>2026-03-20T00:00:00Z</published><updated>2026-11-24T00:00:00Z</updated><category term="org" label="org" scheme="https://denden.idlip.in/tags/"></category><category term="writing" label="writing" scheme="https://denden.idlip.in/tags/"></category><summary>What a few more Org features look like on the page: callouts, a table, a quote and footnotes.</summary><content type="html">&lt;p&gt;
+Org has more than paragraphs and lists. Here is how a few of its other pieces come out of the default layout.
+&lt;/p&gt;
+&lt;div id=&quot;outline-container-callouts&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;callouts&quot;&gt;Callouts&lt;a class=&quot;heading-anchor&quot; href=&quot;#callouts&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-callouts&quot;&gt;
+&lt;div class=&quot;callout&quot; role=&quot;note&quot; data-callout=&quot;note&quot;&gt;
+&lt;p&gt;Note&lt;/p&gt;
+&lt;p&gt;
+A note block becomes a labelled callout. The site decides which block types are callouts.
+&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout&quot; role=&quot;note&quot; data-callout=&quot;tip&quot;&gt;
+&lt;p&gt;Tip&lt;/p&gt;
+&lt;p&gt;
+Write the block in Org as &lt;code&gt;#+begin_tip&lt;/code&gt; and &lt;code&gt;#+end_tip&lt;/code&gt;.
+&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout&quot; role=&quot;note&quot; data-callout=&quot;warn&quot;&gt;
+&lt;p&gt;Warning&lt;/p&gt;
+&lt;p&gt;
+Callouts are for asides. A page made of them is hard to read.
+&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-a-table&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;a-table&quot;&gt;A table&lt;a class=&quot;heading-anchor&quot; href=&quot;#a-table&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-a-table&quot;&gt;
+&lt;table&gt;
+
+
+&lt;colgroup&gt;
+&lt;col  class=&quot;org-left&quot;&gt;
+
+&lt;col  class=&quot;org-left&quot;&gt;
+
+&lt;col  class=&quot;org-left&quot;&gt;
+&lt;/colgroup&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th scope=&quot;col&quot; class=&quot;org-left&quot;&gt;Piece&lt;/th&gt;
+&lt;th scope=&quot;col&quot; class=&quot;org-left&quot;&gt;Org writes&lt;/th&gt;
+&lt;th scope=&quot;col&quot; class=&quot;org-left&quot;&gt;The page shows&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td class=&quot;org-left&quot;&gt;Heading&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;&lt;code&gt;* Title&lt;/code&gt;&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;an &lt;code&gt;h2&lt;/code&gt; with a link&lt;/td&gt;
+&lt;/tr&gt;
+
+&lt;tr&gt;
+&lt;td class=&quot;org-left&quot;&gt;Emphasis&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;&lt;code&gt;*bold*&lt;/code&gt;, &lt;code&gt;/italic/&lt;/code&gt;&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;&lt;b&gt;bold&lt;/b&gt;, &lt;i&gt;italic&lt;/i&gt;&lt;/td&gt;
+&lt;/tr&gt;
+
+&lt;tr&gt;
+&lt;td class=&quot;org-left&quot;&gt;Code&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;&lt;code&gt;~code~&lt;/code&gt;&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;&lt;code&gt;code&lt;/code&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-a-quote-and-footnotes&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;a-quote-and-footnotes&quot;&gt;A quote and footnotes&lt;a class=&quot;heading-anchor&quot; href=&quot;#a-quote-and-footnotes&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-a-quote-and-footnotes&quot;&gt;
+&lt;blockquote&gt;
+&lt;p&gt;
+Plain text will never go out of style.
+&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;p&gt;
+Footnotes collect at the end of the post&lt;sup&gt;&lt;a id=&quot;fnr.1&quot; class=&quot;footref&quot; href=&quot;#fn.1&quot; role=&quot;doc-backlink&quot;&gt;1&lt;/a&gt;&lt;/sup&gt;, each with a link back to where it was used&lt;sup&gt;&lt;a id=&quot;fnr.2&quot; class=&quot;footref&quot; href=&quot;#fn.2&quot; role=&quot;doc-backlink&quot;&gt;2&lt;/a&gt;&lt;/sup&gt;.
+&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;footnotes&quot;&gt;
+&lt;h2 class=&quot;footnotes&quot;&gt;Footnotes: &lt;/h2&gt;
+&lt;div id=&quot;text-footnotes&quot;&gt;
+
+&lt;div class=&quot;footdef&quot;&gt;&lt;sup&gt;&lt;a id=&quot;fn.1&quot; class=&quot;footnum&quot; href=&quot;#fnr.1&quot; role=&quot;doc-backlink&quot;&gt;1&lt;/a&gt;&lt;/sup&gt; &lt;div class=&quot;footpara&quot; role=&quot;doc-footnote&quot;&gt;&lt;p class=&quot;footpara&quot;&gt;
+Like this one.
+&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;div class=&quot;footdef&quot;&gt;&lt;sup&gt;&lt;a id=&quot;fn.2&quot; class=&quot;footnum&quot; href=&quot;#fnr.2&quot; role=&quot;doc-backlink&quot;&gt;2&lt;/a&gt;&lt;/sup&gt; &lt;div class=&quot;footpara&quot; role=&quot;doc-footnote&quot;&gt;&lt;p class=&quot;footpara&quot;&gt;
+And this one.
+&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+
+
+&lt;/div&gt;
+&lt;/div&gt;</content></entry><entry><title>An Org-Mode Tour</title><link rel="alternate" type="text/html" href="https://denden.idlip.in/blog/org-mode-tour/" /><id>https://denden.idlip.in/blog/org-mode-tour/</id><published>2026-03-02T00:00:00Z</published><updated>2026-11-24T00:00:00Z</updated><category term="org" label="org" scheme="https://denden.idlip.in/tags/"></category><category term="emacs" label="emacs" scheme="https://denden.idlip.in/tags/"></category><summary>A longer post, mostly as a tour of what plain Org gives you for free once it goes through the denden-html backend: bold, italic, code, verbatim, and strikethrough, all native syntax, no shortcodes.
+
+External: the Org-mode homepage. Internal: back to Blog.</summary><content type="html">&lt;p&gt;
+A longer post, mostly as a tour of what plain Org gives you for free once
+it goes through the &lt;code&gt;denden-html&lt;/code&gt; backend: &lt;b&gt;bold&lt;/b&gt;, &lt;i&gt;italic&lt;/i&gt;, &lt;code&gt;code&lt;/code&gt;,
+&lt;code&gt;verbatim&lt;/code&gt;, and &lt;del&gt;strikethrough&lt;/del&gt;, all native syntax, no shortcodes.
+&lt;/p&gt;
+&lt;div id=&quot;outline-container-lists&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;lists&quot;&gt;Lists&lt;a class=&quot;heading-anchor&quot; href=&quot;#lists&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-lists&quot;&gt;
+&lt;ul class=&quot;org-ul&quot;&gt;
+&lt;li&gt;Plain Org, exported straight through &lt;code&gt;denden-html&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Nested items work the same as any other list.
+&lt;ul class=&quot;org-ul&quot;&gt;
+&lt;li&gt;Like this one.&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;li class=&quot;on&quot;&gt;&lt;input type='checkbox' checked='checked' /&gt; Checkboxes render too.&lt;/li&gt;
+&lt;li class=&quot;off&quot;&gt;&lt;input type='checkbox' /&gt; Including the unfinished ones.&lt;/li&gt;
+&lt;/ul&gt;
+
+
+&lt;ol class=&quot;org-ol&quot;&gt;
+&lt;li&gt;Ordered lists as well.&lt;/li&gt;
+&lt;li&gt;Second item.&lt;/li&gt;
+&lt;/ol&gt;
+
+
+&lt;dl class=&quot;org-dl&quot;&gt;
+&lt;dt&gt;Bear Blog&lt;/dt&gt;&lt;dd&gt;A hosted, deliberately minimal blogging platform.&lt;/dd&gt;
+&lt;dt&gt;denden.el&lt;/dt&gt;&lt;dd&gt;This library &amp;ndash; content stays real Org, not a rendered
+HTML string, all the way through the build.&lt;/dd&gt;
+&lt;/dl&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-a-table&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;a-table&quot;&gt;A Table&lt;a class=&quot;heading-anchor&quot; href=&quot;#a-table&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-a-table&quot;&gt;
+&lt;table&gt;
+
+
+&lt;colgroup&gt;
+&lt;col  class=&quot;org-left&quot;&gt;
+
+&lt;col  class=&quot;org-left&quot;&gt;
+
+&lt;col  class=&quot;org-right&quot;&gt;
+&lt;/colgroup&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th scope=&quot;col&quot; class=&quot;org-left&quot;&gt;Language&lt;/th&gt;
+&lt;th scope=&quot;col&quot; class=&quot;org-left&quot;&gt;Paradigm&lt;/th&gt;
+&lt;th scope=&quot;col&quot; class=&quot;org-right&quot;&gt;Year&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td class=&quot;org-left&quot;&gt;Emacs Lisp&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;Functional&lt;/td&gt;
+&lt;td class=&quot;org-right&quot;&gt;1985&lt;/td&gt;
+&lt;/tr&gt;
+
+&lt;tr&gt;
+&lt;td class=&quot;org-left&quot;&gt;Python&lt;/td&gt;
+&lt;td class=&quot;org-left&quot;&gt;Multi&lt;/td&gt;
+&lt;td class=&quot;org-right&quot;&gt;1991&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-links&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;links&quot;&gt;Links&lt;a class=&quot;heading-anchor&quot; href=&quot;#links&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-links&quot;&gt;
+&lt;p&gt;
+External: &lt;a href=&quot;https://orgmode.org/&quot;&gt;the Org-mode homepage&lt;/a&gt;. Internal:
+back to &lt;a href=&quot;/blog/&quot;&gt;Blog&lt;/a&gt;.
+&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-a-blockquote&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;a-blockquote&quot;&gt;A Blockquote&lt;a class=&quot;heading-anchor&quot; href=&quot;#a-blockquote&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-a-blockquote&quot;&gt;
+&lt;blockquote&gt;
+&lt;p&gt;
+&quot;An idiot admires complexity, a genius admires simplicity.&quot;
+&amp;mdash; Terry Davis
+&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-code&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;code&quot;&gt;Code&lt;a class=&quot;heading-anchor&quot; href=&quot;#code&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-code&quot;&gt;
+&lt;div class=&quot;org-src-container&quot;&gt;
+&lt;pre tabindex=&quot;0&quot; class=&quot;src src-emacs-lisp&quot;&gt;&lt;code&gt;(&lt;span class=&quot;org-keyword&quot;&gt;defun&lt;/span&gt; &lt;span class=&quot;org-function-name&quot;&gt;greet&lt;/span&gt; (name)
+  &lt;span class=&quot;org-doc&quot;&gt;&quot;Return a greeting for NAME.&quot;&lt;/span&gt;
+  (format &lt;span class=&quot;org-string&quot;&gt;&quot;Hello, %s!&quot;&lt;/span&gt; name))
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;org-src-container&quot;&gt;
+&lt;pre tabindex=&quot;0&quot; class=&quot;src src-python&quot;&gt;&lt;code&gt;&lt;span class=&quot;org-keyword&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;org-function-name&quot;&gt;greet&lt;/span&gt;(name: &lt;span class=&quot;org-builtin&quot;&gt;str&lt;/span&gt;) &lt;span class=&quot;org-operator&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;org-builtin&quot;&gt;str&lt;/span&gt;:
+    &lt;span class=&quot;org-keyword&quot;&gt;return&lt;/span&gt; f&lt;span class=&quot;org-string&quot;&gt;&quot;Hello, &lt;/span&gt;{name}&lt;span class=&quot;org-string&quot;&gt;!&quot;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-callouts&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;callouts&quot;&gt;Callouts&lt;a class=&quot;heading-anchor&quot; href=&quot;#callouts&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-callouts&quot;&gt;
+&lt;div class=&quot;callout&quot; role=&quot;note&quot; data-callout=&quot;note&quot;&gt;
+&lt;p&gt;Note&lt;/p&gt;
+&lt;p&gt;
+This is a note callout &amp;ndash; &lt;code&gt;denden-special-block&lt;/code&gt; renders
+&lt;code&gt;#+begin_note=/=tip=/=warn&lt;/code&gt; as a styled div, real Org formatting inside.
+&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout&quot; role=&quot;note&quot; data-callout=&quot;tip&quot;&gt;
+&lt;p&gt;Tip&lt;/p&gt;
+&lt;p&gt;
+A tip callout: useful for asides the reader can skip.
+&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout&quot; role=&quot;note&quot; data-callout=&quot;warn&quot;&gt;
+&lt;p&gt;Warning&lt;/p&gt;
+&lt;p&gt;
+A warning callout, for the one thing worth flagging loudly.
+&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;outline-container-sidenote-and-footnotes&quot; class=&quot;outline-2&quot;&gt;
+&lt;h2 id=&quot;sidenote-and-footnotes&quot;&gt;Sidenote and Footnotes&lt;a class=&quot;heading-anchor&quot; href=&quot;#sidenote-and-footnotes&quot; aria-label=&quot;Link to this section&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
+&lt;div class=&quot;outline-text-2&quot; id=&quot;text-sidenote-and-footnotes&quot;&gt;
+&lt;p&gt;
+Here is a sentence with a sidenote.&lt;aside class=&quot;sidenote&quot;&gt;An aside in the margin on wide screens&lt;/aside&gt; And a sentence with a
+footnote.&lt;sup&gt;&lt;a id=&quot;fnr.1&quot; class=&quot;footref&quot; href=&quot;#fn.1&quot; role=&quot;doc-backlink&quot;&gt;1&lt;/a&gt;&lt;/sup&gt;
+&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&quot;footnotes&quot;&gt;
+&lt;h2 class=&quot;footnotes&quot;&gt;Footnotes: &lt;/h2&gt;
+&lt;div id=&quot;text-footnotes&quot;&gt;
+
+&lt;div class=&quot;footdef&quot;&gt;&lt;sup&gt;&lt;a id=&quot;fn.1&quot; class=&quot;footnum&quot; href=&quot;#fnr.1&quot; role=&quot;doc-backlink&quot;&gt;1&lt;/a&gt;&lt;/sup&gt; &lt;div class=&quot;footpara&quot; role=&quot;doc-footnote&quot;&gt;&lt;p class=&quot;footpara&quot;&gt;
+Footnotes work the same way: a reference here, a definition down
+here, both handled by ox-html itself, not by denden's own code.
+&lt;/p&gt;
+
+&lt;hr&gt;
+
+&lt;p class=&quot;footpara&quot;&gt;
+That covers most of what a normal post reaches for. The full feature
+sweep (radio targets, LaTeX, drawers, timestamps, and the rest) lives in
+denden's own test fixtures, not here &amp;ndash; this is meant to read like a
+post, not a checklist.
+&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+
+
+&lt;/div&gt;
+&lt;/div&gt;</content></entry><entry><title>Plain Text, Forever</title><link rel="alternate" type="text/html" href="https://denden.idlip.in/blog/plain-text-forever/" /><id>https://denden.idlip.in/blog/plain-text-forever/</id><published>2026-02-14T00:00:00Z</published><updated>2026-11-24T00:00:00Z</updated><category term="writing" label="writing" scheme="https://denden.idlip.in/tags/"></category><category term="org" label="org" scheme="https://denden.idlip.in/tags/"></category><summary>Bear Blog's whole pitch is that a post can be small: no tracking, no bloat, a page that loads before you have finished clicking. That's a design choice, not a technology one. This example proves the same idea holds with an entirely different toolchain underneath it.
+
+Run that, or just example-build from denden/, and example/public/ comes out the other end.</summary><content type="html">&lt;p&gt;
+Bear Blog's whole pitch is that a post can be small: no tracking, no
+bloat, a page that loads before you have finished clicking. That's a
+design choice, not a technology one. This example proves the same idea
+holds with an entirely different toolchain underneath it.
+&lt;/p&gt;
+
+&lt;div class=&quot;org-src-container&quot;&gt;
+&lt;pre tabindex=&quot;0&quot; class=&quot;src src-emacs-lisp&quot;&gt;&lt;code&gt;(&lt;span class=&quot;org-keyword&quot;&gt;require&lt;/span&gt; '&lt;span class=&quot;org-constant&quot;&gt;denden&lt;/span&gt;)
+(&lt;span class=&quot;org-keyword&quot;&gt;require&lt;/span&gt; '&lt;span class=&quot;org-constant&quot;&gt;example-site&lt;/span&gt;)
+(example-build t)
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;
+Run that, or &lt;code&gt;just example-build&lt;/code&gt; from &lt;code&gt;denden/&lt;/code&gt;, and &lt;code&gt;example/public/&lt;/code&gt;
+comes out the other end.
+&lt;/p&gt;
+</content></entry><entry><title>Hello, World</title><link rel="alternate" type="text/html" href="https://denden.idlip.in/blog/hello-world/" /><id>https://denden.idlip.in/blog/hello-world/</id><published>2026-01-08T00:00:00Z</published><updated>2026-11-24T00:00:00Z</updated><category term="meta" label="meta" scheme="https://denden.idlip.in/tags/"></category><summary>A first post. Nothing fancy: a paragraph, then a list.
+
+Wire your own site up the same way example-site.el does, against your own content and your own theme.</summary><content type="html">&lt;p&gt;
+A first post. Nothing fancy: a paragraph, then a list.
+&lt;/p&gt;
+
+&lt;ul class=&quot;org-ul&quot;&gt;
+&lt;li&gt;Plain Org, exported straight through the denden-html backend.&lt;/li&gt;
+&lt;li&gt;No shortcodes, no front matter beyond what Org already gives you.&lt;/li&gt;
+&lt;li&gt;One stylesheet, and that is the whole build.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;
+Wire your own site up the same way &lt;code&gt;example-site.el&lt;/code&gt; does, against your
+own content and your own theme.
+&lt;/p&gt;
+</content></entry></feed>

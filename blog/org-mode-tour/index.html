@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>An Org-Mode Tour | A Plain Blog</title><meta name="description" content="A longer post, mostly as a tour of what plain Org gives you for free once it goes through the denden-html backend: bold, italic, code, verbatim, and strikethro…" /><meta name="author" content="Jane Doe" /><link rel="canonical" href="https://denden.idlip.in/blog/org-mode-tour/" /><meta property="og:title" content="An Org-Mode Tour" /><meta property="og:type" content="article" /><meta property="og:url" content="https://denden.idlip.in/blog/org-mode-tour/" /><meta property="og:site_name" content="A Plain Blog" /><meta property="og:locale" content="en" /><meta property="og:description" content="A longer post, mostly as a tour of what plain Org gives you for free once it goes through the denden-html backend: bold, italic, code, verbatim, and strikethro…" /><meta property="article:published_time" content="2026-03-02" /><meta property="article:modified_time" content="2026-11-24" /><meta property="article:tag" content="org" /><meta property="article:tag" content="emacs" /><meta name="twitter:card" content="summary" /><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"An Org-Mode Tour","datePublished":"2026-03-02","dateModified":"2026-11-24","description":"A longer post, mostly as a tour of what plain Org gives you for free once it goes through the denden-html backend: bold, italic, code, verbatim, and strikethro…","author":{"@type":"Person","name":"Jane Doe"},"publisher":{"@type":"Person","name":"Jane Doe"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://denden.idlip.in/blog/org-mode-tour/"},"url":"https://denden.idlip.in/blog/org-mode-tour/","keywords":"org, emacs"}</script><link rel="alternate" type="application/atom+xml" title="A Plain Blog" href="/feed.xml" /><link rel="stylesheet" href="/modus.css" /><link rel="stylesheet" href="/style.css" /></head><body><header><a href="/">A Plain Blog</a><nav><a href="/">Home</a><a href="/blog/">Blog</a><a href="/tags/">Tags</a><a href="/about/">About</a></nav></header><main><article class="h-entry"><h1 class="p-name">An Org-Mode Tour</h1><p><time class="dt-published" datetime="2026-03-02">2026-03-02</time></p><p class="terms"><a class="p-category" href="/tags/org/">#org</a> <a class="p-category" href="/tags/emacs/">#emacs</a></p><div class="e-content"><p>
+A longer post, mostly as a tour of what plain Org gives you for free once
+it goes through the <code>denden-html</code> backend: <b>bold</b>, <i>italic</i>, <code>code</code>,
+<code>verbatim</code>, and <del>strikethrough</del>, all native syntax, no shortcodes.
+</p>
+<div id="outline-container-lists" class="outline-2">
+<h2 id="lists">Lists<a class="heading-anchor" href="#lists" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-lists">
+<ul class="org-ul">
+<li>Plain Org, exported straight through <code>denden-html</code>.</li>
+<li>Nested items work the same as any other list.
+<ul class="org-ul">
+<li>Like this one.</li>
+</ul></li>
+<li class="on"><input type='checkbox' checked='checked' /> Checkboxes render too.</li>
+<li class="off"><input type='checkbox' /> Including the unfinished ones.</li>
+</ul>
+
+
+<ol class="org-ol">
+<li>Ordered lists as well.</li>
+<li>Second item.</li>
+</ol>
+
+
+<dl class="org-dl">
+<dt>Bear Blog</dt><dd>A hosted, deliberately minimal blogging platform.</dd>
+<dt>denden.el</dt><dd>This library &ndash; content stays real Org, not a rendered
+HTML string, all the way through the build.</dd>
+</dl>
+</div>
+</div>
+<div id="outline-container-a-table" class="outline-2">
+<h2 id="a-table">A Table<a class="heading-anchor" href="#a-table" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-a-table">
+<table>
+
+
+<colgroup>
+<col  class="org-left">
+
+<col  class="org-left">
+
+<col  class="org-right">
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Language</th>
+<th scope="col" class="org-left">Paradigm</th>
+<th scope="col" class="org-right">Year</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Emacs Lisp</td>
+<td class="org-left">Functional</td>
+<td class="org-right">1985</td>
+</tr>
+
+<tr>
+<td class="org-left">Python</td>
+<td class="org-left">Multi</td>
+<td class="org-right">1991</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="outline-container-links" class="outline-2">
+<h2 id="links">Links<a class="heading-anchor" href="#links" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-links">
+<p>
+External: <a href="https://orgmode.org/">the Org-mode homepage</a>. Internal:
+back to <a href="/blog/">Blog</a>.
+</p>
+</div>
+</div>
+<div id="outline-container-a-blockquote" class="outline-2">
+<h2 id="a-blockquote">A Blockquote<a class="heading-anchor" href="#a-blockquote" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-a-blockquote">
+<blockquote>
+<p>
+"An idiot admires complexity, a genius admires simplicity."
+&mdash; Terry Davis
+</p>
+</blockquote>
+</div>
+</div>
+<div id="outline-container-code" class="outline-2">
+<h2 id="code">Code<a class="heading-anchor" href="#code" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-code">
+<div class="org-src-container">
+<pre tabindex="0" class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">greet</span> (name)
+  <span class="org-doc">"Return a greeting for NAME."</span>
+  (format <span class="org-string">"Hello, %s!"</span> name))
+</code></pre>
+</div>
+
+<div class="org-src-container">
+<pre tabindex="0" class="src src-python"><code><span class="org-keyword">def</span> <span class="org-function-name">greet</span>(name: <span class="org-builtin">str</span>) <span class="org-operator">-&gt;</span> <span class="org-builtin">str</span>:
+    <span class="org-keyword">return</span> f<span class="org-string">"Hello, </span>{name}<span class="org-string">!"</span>
+</code></pre>
+</div>
+</div>
+</div>
+<div id="outline-container-callouts" class="outline-2">
+<h2 id="callouts">Callouts<a class="heading-anchor" href="#callouts" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-callouts">
+<div class="callout" role="note" data-callout="note">
+<p>Note</p>
+<p>
+This is a note callout &ndash; <code>denden-special-block</code> renders
+<code>#+begin_note=/=tip=/=warn</code> as a styled div, real Org formatting inside.
+</p>
+</div>
+
+<div class="callout" role="note" data-callout="tip">
+<p>Tip</p>
+<p>
+A tip callout: useful for asides the reader can skip.
+</p>
+</div>
+
+<div class="callout" role="note" data-callout="warn">
+<p>Warning</p>
+<p>
+A warning callout, for the one thing worth flagging loudly.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-sidenote-and-footnotes" class="outline-2">
+<h2 id="sidenote-and-footnotes">Sidenote and Footnotes<a class="heading-anchor" href="#sidenote-and-footnotes" aria-label="Link to this section">#</a></h2>
+<div class="outline-text-2" id="text-sidenote-and-footnotes">
+<p>
+Here is a sentence with a sidenote.<aside class="sidenote">An aside in the margin on wide screens</aside> And a sentence with a
+footnote.<sup><a id="fnr.1" class="footref" href="#fn.1" role="doc-backlink">1</a></sup>
+</p>
+</div>
+</div>
+<div id="footnotes">
+<h2 class="footnotes">Footnotes: </h2>
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.1" class="footnum" href="#fnr.1" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+Footnotes work the same way: a reference here, a definition down
+here, both handled by ox-html itself, not by denden's own code.
+</p>
+
+<hr>
+
+<p class="footpara">
+That covers most of what a normal post reaches for. The full feature
+sweep (radio targets, LaTeX, drawers, timestamps, and the rest) lives in
+denden's own test fixtures, not here &ndash; this is meant to read like a
+post, not a checklist.
+</p></div></div>
+
+
+</div>
+</div></div></article></main><footer><p class="h-card"><a class="p-name u-url" href="/">Jane Doe</a></p><p><a href="/feed.xml">Feed</a></p><p><a href="https://github.com/idlip/denden/blob/master/example/content/blog/org-mode-tour.org">Source of this page</a> · Built with <a href="https://github.com/idlip/denden">Denden</a></p></footer></body></html>

@@ -1,0 +1,27 @@
+:root {
+  color-scheme: dark;
+  --background-color: #000000;
+  --background-dim: #1e1e1e;
+  --text-color: #ffffff;
+  --heading-color: #ffffff;
+  --blockquote-color: #989898;
+  --border-color: #646464;
+  --link-color: #79a8ff;
+  --visited-color: #feacd0;
+  --accent-color: #b6a0ff;
+}
+
+.org-default { color: #ffffff; }
+.org-keyword { color: #b6a0ff; }
+.org-negation-char { color: #b6a0ff; }
+.org-string { color: #79a8ff; }
+.org-doc { color: #9ac8e0; }
+.org-comment { color: #989898; }
+.org-comment-delimiter { color: #989898; }
+.org-function-name { color: #feacd0; }
+.org-variable-name { color: #00d3d0; }
+.org-type { color: #6ae4b9; }
+.org-constant { color: #00bcff; }
+.org-builtin { color: #f78fe7; }
+.org-preprocessor { color: #ff7f86; }
+.org-warning { color: #fec43f; }
