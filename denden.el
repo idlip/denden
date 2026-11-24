@@ -1,1566 +1,1515 @@
-;;; denden.el --- core static-site library on top of ox-publish -*- lexical-binding: t; -*-
+;;; denden.el --- Build a website from Org files -*- lexical-binding: t; -*-
 
-;; Core static-site library: project definition and config, file collection,
-;; the derived ox-html backend, the sexp-HTML serializer, template
-;; resolution, incremental build and the async driver, Atom feeds, sitemap,
-;; robots, aliases and redirects, taxonomy collection, listing and grouping
-;; helpers, the output linter, search index generation, OG card mechanism,
-;; and the user-facing M-x command surface. A site layer supplies its own
-;; templates, content, and site-specific rendering on top of this.
+;; Copyright (C) 2026 Dilip
+
+;; Author: Dilip <dilip@fossunited.org>
+;; Maintainer: Dilip <dilip@fossunited.org>
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "30.1") (org "9.8") (htmlize "1.56"))
+;; URL: https://github.com/idlip/denden
+;; Keywords: hypermedia, outlines
+
+;; This file is not part of GNU Emacs.
+
+;; Permission is hereby granted, free of charge, to any person obtaining
+;; a copy of this software and associated documentation files (the
+;; "Software"), to deal in the Software without restriction, including
+;; without limitation the rights to use, copy, modify, merge, publish,
+;; distribute, sublicense, and/or sell copies of the Software, and to
+;; permit persons to whom the Software is furnished to do so, subject to
+;; the following conditions:
 ;;
-;; A site layer is expected to set: `denden-content-directory',
-;; `denden-publishing-directory', `denden-project-root-directory',
-;; `denden-full-build-function' and `denden-build-function'. Optionally:
-;; `denden-post-directory' (used only by `denden-new'). Everything below
-;; that reads one of those variables works for any site, not just one
-;; in particular.
+;; The above copyright notice and this permission notice shall be
+;; included in all copies or substantial portions of the Software.
 ;;
+;; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+;; EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+;; MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+;; NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+;; LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+;; OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+;; WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ;;; Commentary:
+
+;; Denden is a small library for building a website from Org files.  It
+;; uses Org's own export and publishing code, and adds what a site needs
+;; on top: pages with metadata, layouts, feeds, a sitemap and pretty URLs.
 ;;
-;; denden name is derived from japanese term 'でん' for snail
+;; A site is one definition:
 ;;
-;; Tried to not build yet another package, but based on ox-publish and all native libs
-;; just added helper commands that completes for enhancements. Following same suite as VOMPECC.
+;;   (denden-define-site my-blog
+;;     "My personal blog."
+;;     :title "My blog"
+;;     :base-url "https://example.org/")
 ;;
+;; Then M-x denden-build writes the site.  Templates are plain Lisp
+;; lists, such as (p (:class "note") "Hello"), turned into HTML by
+;; `denden-serialize-node'.  Every function that renders returns text
+;; and writes nothing, so the same functions can build files or answer
+;; a request.
+;;
+;; The name comes from the Japanese "denden mushi", a snail.
+
 ;;; Code:
 
 (require 'cl-lib)
 (require 'dom)
+(require 'org)
+(require 'org-element)
 (require 'ox-html)
-(require 'rx)
 (require 'url-parse)
-(require 'ox-ascii)
-(require 'ox-publish)
-(require 'filenotify)
+(require 'url-util)
+
+;;;; Options
 
 (defgroup denden nil
-  "Emacs/Org static site builder."
-  :group 'applications)
+  "Build a website from Org files."
+  :group 'org-export
+  :prefix "denden-"
+  :link '(url-link "https://github.com/idlip/denden"))
 
-(defconst denden-repository-directory
-  (file-name-directory (directory-file-name (file-name-directory (or load-file-name buffer-file-name))))
-  "Repo root, captured from this file's own location at load time.")
+(defcustom denden-include-drafts nil
+  "Non-nil means build pages whose file sets #+draft: t.
+A preview build may bind this to t; a real build leaves it nil."
+  :type 'boolean
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
 
-;;;; Sexp-HTML serializer
+(defcustom denden-broken-link-action 'warn
+  "What a build does with a link to a file the build did not write.
+After a build writes every file, it checks each link between pages,
+to static files and to outputs such as feeds.  `warn' shows a
+message for each link to nothing, and `error' stops the build."
+  :type '(choice (const :tag "Show a message" warn)
+                 (const :tag "Stop the build" error))
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-lastmod-from-git t
+  "Non-nil means take each page's last-modified date from git.
+A page with no git history, or every page when this is nil, uses its
+#+date: instead, or has no last-modified date.  The date of the file
+is never used: it changes with every copy, so builds of the same
+content would differ."
+  :type 'boolean
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+;; Cosmetic options: small touches on the markup Denden writes.  Each
+;; default follows current practice; change them to taste.
+
+(defcustom denden-heading-anchor-text "#"
+  "Text of the link at the end of each heading, or nil for no link.
+The link points to the heading itself, so a reader can copy the
+address of a section.  Try \"¶\", \"§\" or an icon from your font."
+  :type '(choice (string :tag "Text")
+                 (const :tag "No link" nil))
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-heading-anchor-label "Link to this section"
+  "Name that screen readers give the link at the end of each heading.
+See `denden-heading-anchor-text'."
+  :type 'string
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-code-highlighting 'css
+  "How code blocks are coloured.
+`css' writes classes such as org-keyword, and a style sheet gives
+them colours, so colours can follow light and dark modes and change
+without a new build.  To get a style sheet from your Emacs theme,
+use \\[org-html-htmlize-generate-css].
+`inline-css' writes the colours of your current Emacs theme into
+each page, as Org does by default.
+nil writes plain code with no colours."
+  :type '(choice (const :tag "Classes, coloured by a style sheet" css)
+                 (const :tag "Colours of the Emacs theme, in the page" inline-css)
+                 (const :tag "No colours" nil))
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-figure-numbers t
+  "Non-nil means show \"Figure 1:\" before each image caption, as Org does.
+Org's links to a named figure use this number as their text, so
+keep it when your text refers to figures."
+  :type 'boolean
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-lazy-images t
+  "Non-nil means images load only when they come near the screen.
+This makes long pages with many images open faster.  An image whose
+#+attr_html: sets :loading keeps its own value."
+  :type 'boolean
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-page-title-format "%s | %s"
+  "Format of the title in the browser tab, for every page but the home page.
+The first %s is the page title and the second the site title.  Use
+\"%1$s\" alone for the page title only, or \"%2$s: %1$s\" to
+put the site first.  The home page shows the site title."
+  :type 'string
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-excerpt-paragraphs 2
+  "Number of paragraphs in a page's excerpt.
+A page with no #+description: uses its first paragraphs as its
+description, for search engines, link previews and feeds."
+  :type 'natnum
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+(defcustom denden-date-format "%F"
+  "Format of dates shown on pages, for `format-time-string'.
+The default, such as 2024-02-03, reads the same in every language.
+For example, \"%e %B %Y\" gives 3 February 2024."
+  :type 'string
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
+
+;;;; Sites
+
+(cl-defstruct (denden-site (:constructor denden-site-create)
+                           (:copier nil))
+  "One website: where its files are and how its pages are rendered.
+Every field has a default, so (denden-site-create) is a working site.
+Folder fields are relative to ROOT-DIRECTORY."
+  (title "My site" :documentation "Title used in the page shell and feeds.")
+  (base-url "https://example.org/"
+            :documentation "Address of the site.  See `denden-base-url'.")
+  (description "" :documentation "Default meta description and feed subtitle.")
+  (author user-full-name :documentation "Author named in feeds and meta tags.")
+  (language "en" :documentation "Language of the pages, such as \"en\".")
+  (root-directory nil
+                  :documentation "Folder the other folders are relative to.
+When nil, it is the folder of the file that defines the site.")
+  (content-directory "content" :documentation "Folder with the Org files.")
+  (static-directory "static" :documentation "Folder copied as it is.")
+  (publishing-directory "public" :documentation "Folder the site is written to.")
+  (taxonomies '("tags")
+              :documentation "Keywords whose values are terms, such as tags.")
+  (layouts nil
+           :documentation "Alist of (LAYOUT . FUNCTION) for #+layout: values.
+FUNCTION takes the site, the page and all pages, and returns the
+node of the page's main part.")
+  (default-layout #'denden-render-plain-page
+                  :documentation "Render function for pages with no known layout.")
+  (page-shell #'denden-default-page-shell
+              :documentation "Function that wraps a page's main part in a page.")
+  (outputs (list #'denden-feed-output #'denden-term-outputs #'denden-sitemap-output
+                 #'denden-robots-output #'denden-redirect-outputs)
+           :documentation "Functions that return extra files as (URL . TEXT).
+Each takes the site and all pages.  Add `denden-search-index-output'
+for a search index.")
+  (menu nil
+        :documentation "Links in the header of the default page, as (LABEL . URL).")
+  (stylesheets nil
+               :documentation "Addresses of the style sheets the default page links.")
+  (feed-entry-count 20
+                    :documentation "Number of entries in each feed, or nil for all.")
+  (link-label-rules nil
+                    :documentation "Alist of (REGEXP . REPLACEMENT) for bare URL labels.")
+  (callout-types '(("note" . "Note") ("tip" . "Tip") ("warn" . "Warning"))
+                 :documentation "Alist of special block types shown as callouts.")
+  (evaluate-code nil
+                 :documentation "Non-nil means run code blocks while exporting.
+Only set it for content you wrote: the code runs without asking."))
+
+(defvar denden-sites nil
+  "Alist of (NAME . SITE) for every site made by `denden-define-site'.")
+
+(defun denden--register-site (name site file)
+  "Store SITE under NAME in `denden-sites' and return SITE.
+When SITE has no root directory, use the folder of FILE, the file
+that defines the site, or `default-directory' when FILE is nil."
+  (unless (denden-site-root-directory site)
+    (setf (denden-site-root-directory site)
+          (if file (file-name-directory file) default-directory)))
+  (setf (alist-get name denden-sites) site)
+  site)
+
+(defmacro denden-define-site (name docstring &rest fields)
+  "Define NAME as a variable that holds a site, and register the site.
+DOCSTRING documents the variable.  FIELDS are keyword arguments for
+`denden-site-create', such as :title and :base-url.  A field that is
+not given keeps its default.  Evaluating the form again replaces the
+site, so a changed definition takes effect at once.
+
+For example:
+
+  (denden-define-site my-blog
+    \"My personal blog.\"
+    :title \"My blog\"
+    :base-url \"https://example.org/\")"
+  (declare (doc-string 2) (indent defun)
+           (debug (&define name stringp &rest sexp)))
+  `(progn
+     (defvar ,name nil ,docstring)
+     (setq ,name (denden--register-site ',name
+                                        (denden-site-create ,@fields)
+                                        (or load-file-name buffer-file-name)))
+     ',name))
+
+(defconst denden-preview-base-url-variable "DENDEN_PREVIEW_BASE_URL"
+  "Environment variable that replaces every site's base URL when set.
+A preview build sets it to a local address, such as
+\"http://localhost:8000/\", so links and feeds point at the preview.")
+
+(defconst denden-feed-url "feed.xml"
+  "URL of the feed that `denden-feed-output' writes, relative to the site.")
+
+(defun denden-base-url (site)
+  "Return the base URL of SITE, always ending in a slash.
+When the environment variable named by
+`denden-preview-base-url-variable' is set and not empty, return its
+value instead."
+  (let ((preview (getenv denden-preview-base-url-variable)))
+    (file-name-as-directory
+     (if (and preview (not (string-empty-p preview)))
+         preview
+       (denden-site-base-url site)))))
+
+;;;; Pages
+
+(cl-defstruct (denden-page (:constructor denden-page-create)
+                           (:copier nil))
+  "One page of a site, collected from its Org file before rendering."
+  (source nil :documentation "Absolute file name of the Org file.")
+  (text nil :documentation "Text of the Org file, read once per build.")
+  (url nil :documentation "Address relative to the site, such as \"log/x/\".")
+  (title nil :documentation "Title from #+title:, else the file name.")
+  (date nil :documentation "Date from #+date:, as a Lisp time value.")
+  (lastmod nil :documentation "Date of the last change, as a Lisp time value.")
+  (description nil :documentation "Text from #+description:.")
+  (section nil :documentation "First folder of the URL, such as \"log\".")
+  (layout nil :documentation "Value of #+layout:, or nil.")
+  (draft nil :documentation "Non-nil when the file sets #+draft: t.")
+  (terms nil :documentation "Alist of (TAXONOMY . TERMS), such as tags.")
+  (aliases nil :documentation "Old URLs that redirect to this page.")
+  (links nil :documentation "Site URLs this page links to, such as \"log/x/\".
+They include pages, static files and outputs; the build checks that
+each one was written.")
+  (external-links nil
+                  :documentation "List of (URL . TEXT) for links to other sites.
+TEXT is the link's description as plain text, or nil when it has none.")
+  (body nil :documentation "Body HTML, filled in the first time it is needed.")
+  (meta nil :documentation "Plist of other #+KEYWORD: values, for site code."))
+
+;; Pages are collected once per build.  Each Org file is read from disk
+;; once, and its text is kept in the page, so the export later works
+;; from memory.  Collecting reads only keywords, which needs no full
+;; parse; the one full parse of each file is its export.
+
+(defun denden--git-lastmod-table (directory)
+  "Return a hash table from each file under DIRECTORY to its last commit time.
+It uses one git call for all files.  Return nil when DIRECTORY is not
+in a git repository or git is not installed."
+  (let ((default-directory (file-name-as-directory directory))
+        (table (make-hash-table :test #'equal))
+        (time nil))
+    (condition-case nil
+        (dolist (line (process-lines "git" "log" "--relative" "--name-only"
+                                     "--format=commit:%cs" "--" "."))
+          (cond
+           ((string-prefix-p "commit:" line)
+            (setq time (date-to-time (substring line (length "commit:")))))
+           ((string-empty-p line))
+           (t (let ((file (expand-file-name line)))
+                (unless (gethash file table)
+                  (puthash file time table))))))
+      (error (setq table nil)))
+    table))
+
+(defun denden--slugify-path (relative-path)
+  "Return RELATIVE-PATH with each part made lowercase, safe for a URL.
+Spaces and underscores become hyphens, other characters outside a to z,
+0 to 9 and the hyphen are removed, and repeated hyphens are joined."
+  (mapconcat
+   (lambda (part)
+     (let* ((text (downcase part))
+            (text (replace-regexp-in-string (rx (+ (in " _"))) "-" text))
+            (text (replace-regexp-in-string (rx (not (in "a-z0-9-"))) "" text))
+            (text (replace-regexp-in-string (rx (>= 2 "-")) "-" text)))
+       (string-trim text (rx (+ "-")) (rx (+ "-")))))
+   (split-string relative-path "/")
+   "/"))
+
+(defun denden--page-url (relative-file)
+  "Return the site URL of RELATIVE-FILE, an Org file under the content folder.
+\"log/My Post.org\" gives \"log/my-post/\", \"log/_index.org\" gives
+\"log/\", and \"index.org\" gives the empty string, the home page."
+  (let* ((name (file-name-sans-extension relative-file))
+         (directory (or (file-name-directory name) ""))
+         (base (file-name-nondirectory name)))
+    (if (member base '("index" "_index"))
+        (denden--slugify-path directory)
+      (concat (denden--slugify-path name) "/"))))
+
+(defun denden--parse-date (text file)
+  "Return the time value of the date TEXT, written in FILE.
+TEXT is an Org timestamp such as \"[2024-02-03 Sat]\".  Signal an
+error naming FILE when TEXT is not a real date, such as 2024-13-45."
+  (let ((time (ignore-errors (date-to-time text)))
+        (written (and (string-match
+                       (rx (group (= 4 digit) "-" (= 2 digit) "-" (= 2 digit)))
+                       text)
+                      (match-string 1 text))))
+    (unless (and time written (equal written (format-time-string "%F" time)))
+      (error "Denden: %s has the date %S, which is not a real date" file text))
+    time))
+
+(defun denden--buffer-keywords ()
+  "Return the Org keywords of the current buffer as an alist.
+Each entry is (NAME . VALUE), NAME in capitals.  A keyword written
+more than once has its values joined with a space, as Org does for
+#+title:.  Keywords inside blocks do not count."
+  (let ((keywords nil))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward org-keyword-regexp nil t)
+        (let ((element (org-element-at-point)))
+          (when (org-element-type-p element 'keyword)
+            (let* ((name (org-element-property :key element))
+                   (value (org-element-property :value element))
+                   (entry (assoc name keywords)))
+              (if entry
+                  (setcdr entry (concat (cdr entry) " " value))
+                (push (cons name value) keywords)))))))
+    (nreverse keywords)))
+
+(defconst denden--page-keywords
+  '("TITLE" "DATE" "DESCRIPTION" "LAYOUT" "DRAFT" "ALIASES")
+  "Keywords that fill fields of a page record rather than its meta plist.")
+
+(defun denden--true-p (value)
+  "Return non-nil when the keyword VALUE means true, such as t or true."
+  (and value (member (downcase (string-trim value)) '("t" "true" "yes"))))
+
+(defun denden--meta-key (name)
+  "Return the meta plist key for the keyword NAME, so NO_COMMENT gives :no-comment."
+  (intern (concat ":" (string-replace "_" "-" (downcase name)))))
+
+(defun denden--read-page (site file content-directory lastmod-table)
+  "Return the page record of FILE, an Org file of SITE.
+CONTENT-DIRECTORY is the absolute content folder.  LASTMOD-TABLE maps
+files to their last commit time, or is nil."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (delay-mode-hooks (org-mode))
+    (let* ((keywords (denden--buffer-keywords))
+           (relative (file-relative-name file content-directory))
+           (date-text (cdr (assoc "DATE" keywords)))
+           (date (and date-text (denden--parse-date date-text file)))
+           (taxonomies (denden-site-taxonomies site)))
+      (denden-page-create
+       :source file
+       :text (buffer-string)
+       :url (denden--page-url relative)
+       :title (or (cdr (assoc "TITLE" keywords)) (file-name-base file))
+       :date date
+       :lastmod (or (and lastmod-table (gethash file lastmod-table)) date)
+       :description (cdr (assoc "DESCRIPTION" keywords))
+       :section (if (string-search "/" relative)
+                    (car (split-string relative "/"))
+                  "")
+       :layout (cdr (assoc "LAYOUT" keywords))
+       :draft (and (denden--true-p (cdr (assoc "DRAFT" keywords))) t)
+       :terms (mapcar (lambda (taxonomy)
+                        (cons taxonomy
+                              (split-string (or (cdr (assoc (upcase taxonomy) keywords))
+                                                ""))))
+                      taxonomies)
+       :aliases (split-string (or (cdr (assoc "ALIASES" keywords)) ""))
+       :meta (cl-loop for (name . value) in keywords
+                      unless (or (member name denden--page-keywords)
+                                 (member (downcase name) taxonomies))
+                      append (list (denden--meta-key name) value))))))
+
+(defun denden--site-directory (site field)
+  "Return the absolute folder of SITE named by FIELD.
+FIELD is one of the symbols content, static or publishing.  The
+folder is relative to the site's root directory."
+  (expand-file-name
+   (pcase field
+     ('content (denden-site-content-directory site))
+     ('static (denden-site-static-directory site))
+     ('publishing (denden-site-publishing-directory site))
+     (_ (error "Denden: unknown folder %S" field)))
+   (or (denden-site-root-directory site) default-directory)))
+
+(defun denden-collect-pages (site)
+  "Return the pages of SITE, one for each Org file in its content folder.
+Files and folders whose names start with a dot are skipped.  Pages
+with #+draft: t are left out unless `denden-include-drafts' is
+non-nil.  The pages come in the order of their file names."
+  (let* ((content-directory (file-name-as-directory
+                             (denden--site-directory site 'content)))
+         (lastmod-table (and denden-lastmod-from-git
+                             (denden--git-lastmod-table content-directory)))
+         (files (seq-remove
+                 (lambda (file)
+                   (seq-some (lambda (part) (string-prefix-p "." part))
+                             (split-string (file-relative-name file content-directory)
+                                           "/")))
+                 (directory-files-recursively content-directory
+                                              (rx ".org" eos)))))
+    (seq-remove (lambda (page)
+                  (and (denden-page-draft page) (not denden-include-drafts)))
+                (mapcar (lambda (file)
+                          (denden--read-page site file content-directory lastmod-table))
+                        (sort files)))))
+
+;;;; Page lists
+
+(defun denden-sort-pages-by-date (pages)
+  "Return a copy of PAGES sorted by date, newest first.
+Pages with no date come last.  Pages with the same date keep their
+order."
+  (sort pages :key (lambda (page) (or (denden-page-date page) 0))
+        :lessp #'time-less-p :reverse t))
+
+(defun denden-sort-pages-by-title (pages)
+  "Return a copy of PAGES sorted by title, ignoring case."
+  (sort pages :key (lambda (page) (downcase (denden-page-title page)))))
+
+(defun denden-pages-in-section (pages section)
+  "Return the PAGES whose section is SECTION, such as \"log\"."
+  (seq-filter (lambda (page) (equal (denden-page-section page) section)) pages))
+
+(defun denden-sections (pages)
+  "Return the names of the sections of PAGES, each once, in order of first use.
+Pages at the top of the content folder have no section and add none."
+  (seq-uniq (seq-remove #'string-empty-p (mapcar #'denden-page-section pages))))
+
+(defun denden-page-taxonomy-terms (page taxonomy)
+  "Return the terms of PAGE in TAXONOMY, such as its tags."
+  (cdr (assoc taxonomy (denden-page-terms page))))
+
+(defun denden-pages-with-term (pages taxonomy term)
+  "Return the PAGES that have TERM in TAXONOMY.
+For example, (denden-pages-with-term pages \"tags\" \"emacs\")."
+  (seq-filter (lambda (page)
+                (member term (denden-page-taxonomy-terms page taxonomy)))
+              pages))
+
+(defun denden-term-counts (pages taxonomy)
+  "Return how many PAGES use each term of TAXONOMY.
+The result is a list of (TERM . COUNT), the most used first, and
+terms with the same count in alphabetical order."
+  (let ((counts nil))
+    (dolist (page pages)
+      (dolist (term (denden-page-taxonomy-terms page taxonomy))
+        (cl-incf (alist-get term counts 0 nil #'equal))))
+    (sort counts :key (lambda (entry) (list (- (cdr entry)) (car entry))))))
+
+(defun denden-group-pages-by-year (pages)
+  "Return PAGES grouped by the year of their date, newest year first.
+The result is a list of (YEAR . PAGES), YEAR a string such as
+\"2024\", and each group sorted newest first.  Pages with no date
+are grouped under the empty string, last."
+  (let ((groups nil))
+    (dolist (page (denden-sort-pages-by-date pages))
+      (let ((year (if (denden-page-date page)
+                      (format-time-string "%Y" (denden-page-date page))
+                    "")))
+        (if (equal (caar groups) year)
+            (push page (cdar groups))
+          (push (list year page) groups))))
+    (nreverse (mapcar (lambda (group) (cons (car group) (nreverse (cdr group))))
+                      groups))))
+
+(defun denden-backlinks (page pages)
+  "Return the PAGES that link to PAGE, newest first.
+Links are known once page bodies are exported, so call this after
+the export step of a build."
+  (denden-sort-pages-by-date
+   (seq-filter (lambda (other)
+                 (and (not (eq other page))
+                      (member (denden-page-url page) (denden-page-links other))))
+               pages)))
+
+(defun denden-previous-and-next (page pages)
+  "Return the pages of PAGES before and after PAGE in its section, by date.
+The result is (PREVIOUS . NEXT): PREVIOUS is the next older page and
+NEXT the next newer one.  Either is nil at the end of the section."
+  (let* ((siblings (denden-sort-pages-by-date
+                    (denden-pages-in-section pages (denden-page-section page))))
+         (index (seq-position siblings page #'eq)))
+    (when index
+      (cons (nth (1+ index) siblings)
+            (and (> index 0) (nth (1- index) siblings))))))
+
+(defun denden-page-author (site page)
+  "Return the author of PAGE: its #+author:, else the author of SITE."
+  (or (plist-get (denden-page-meta page) :author) (denden-site-author site)))
+
+(defun denden-page-language (site page)
+  "Return the language of PAGE: its #+language:, else the language of SITE."
+  (or (plist-get (denden-page-meta page) :language) (denden-site-language site)))
+
+(defun denden-page-for-source (file pages)
+  "Return the page of PAGES made from the Org FILE, or nil."
+  (let ((file (expand-file-name file)))
+    (seq-find (lambda (page) (equal (denden-page-source page) file)) pages)))
+
+(defun denden-page-permalink (site page)
+  "Return the full address of PAGE in SITE, such as \"https://example.org/log/x/\"."
+  (concat (denden-base-url site) (denden-page-url page)))
+
+;;;; Templates
+
+;; A template is a Lisp list (TAG ATTRIBUTES . CHILDREN).  ATTRIBUTES is a
+;; keyword plist such as (:class "note"), or an alist such as
+;; ((class . "note")), the shape `dom.el' and `libxml-parse-html-region'
+;; use.  A child is a string, another node, or nil, which is skipped so
+;; that (when CONDITION NODE) can sit inside a template.  The node
+;; (raw-html nil STRING) puts STRING in the page without escaping it.
 ;;
-;; denden templates are written as keyword plists, for example:
-;;
-;;   (div (:class "menu-bar" :role "navigation")
-;;     (a (:href "/") "home"))
-;;
-;; `denden-normalise-node' turns the keyword-plist attribute form into the
-;; canonical dom.el node shape (TAG ATTRIBUTES . CHILDREN), where ATTRIBUTES
-;; is an alist of (SYMBOL . VALUE). Canonical nodes are what
-;; `denden-serialize-node' turns into an HTML string, and what
-;; `libxml-parse-html-region' hands back when parsing HTML, so the same node
-;; shape flows through templates, the serializer, and the differ and linter.
-;;
-;; We do not use `dom-print', `esxml-to-xml' or `shr-dom-to-xml': all three
-;; get void and non-void elements wrong for HTML. `denden-serialize-node' is
-;; the fix: void elements are always emitted self-closing, everything else
-;; always gets an explicit closing tag, never a self-closing one.
+;; `dom-print' is not used because it writes <script src="a.js" />, which
+;; is not valid HTML for elements that need a closing tag.
 
 (defconst denden-void-elements
   '(area base br col embed hr img input link meta source track wbr)
-  "HTML elements with no closing tag or children; serialized self-closing,
-like <br />.")
+  "HTML elements that have no closing tag and no children.")
 
-
-(defun denden--keyword-to-attribute-symbol (keyword)
-  "Turn attribute KEYWORD such as :class into the plain symbol class."
-  (intern (substring (symbol-name keyword) 1)))
-
-(defun denden-normalise-attributes (attribute-spec)
-  "Convert ATTRIBUTE-SPEC, an alist or a keyword plist, to a canonical
-alist of (SYMBOL . VALUE)."
+(defun denden--attribute-alist (attributes)
+  "Return ATTRIBUTES, a keyword plist or an alist, as an alist.
+Signal an error that names ATTRIBUTES when its shape is wrong."
   (cond
-   ((null attribute-spec) nil)
-   ((not (proper-list-p attribute-spec))
-    (error "Denden: malformed attribute spec %S is a dotted pair, not a list of pairs -- did you forget to wrap it in a list?"
-           attribute-spec))
-   ((keywordp (car attribute-spec))
-    (unless (cl-evenp (length attribute-spec))
+   ((null attributes) nil)
+   ((not (proper-list-p attributes))
+    (error "Denden: attributes %S are a dotted pair, not a list of pairs"
+           attributes))
+   ((keywordp (car attributes))
+    (unless (cl-evenp (length attributes))
       (error "Denden: attribute plist %S has an odd number of elements"
-             attribute-spec))
-    (cl-loop for (key value) on attribute-spec by #'cddr
-             do (unless (keywordp key)
-                  (error "Denden: attribute plist %S mixes keyword and non-keyword keys at %S"
-                         attribute-spec key))
-             collect (cons (denden--keyword-to-attribute-symbol key) value)))
+             attributes))
+    (cl-loop for (key value) on attributes by #'cddr
+             unless (keywordp key)
+             do (error "Denden: attribute plist %S has the key %S, not a keyword"
+                       attributes key)
+             collect (cons (intern (substring (symbol-name key) 1)) value)))
    (t
-    (dolist (pair attribute-spec)
+    (dolist (pair attributes attributes)
       (unless (and (consp pair) (symbolp (car pair)) (not (keywordp (car pair))))
-        (error "Denden: attribute alist %S contains a malformed entry %S"
-               attribute-spec pair)))
-    attribute-spec)))
-
-(defun denden-normalise-node (node)
-  "Normalise template-form NODE, (TAG ATTRIBUTE-SPEC . CHILDREN), to dom.el's
-(TAG ATTRIBUTE-ALIST . CHILDREN) shape."
-  (if (stringp node)
-      node
-    (cl-destructuring-bind (tag attribute-spec . children) node
-      (append (list tag (denden-normalise-attributes attribute-spec))
-              (mapcar #'denden-normalise-node children)))))
-
-(defconst denden-whitespace-run-regexp (rx (+ (any " \t\n\r")))
-  "Match a run of one or more whitespace characters, for collapsing.")
-
-(defun denden--escape-text (text)
-  "Escape TEXT for use as HTML character data."
-  (let ((text (string-replace "&" "&amp;" text)))
-    (setq text (string-replace "<" "&lt;" text))
-    (setq text (string-replace ">" "&gt;" text))
-    text))
-
-(defun denden--escape-attribute-value (value)
-  "Escape VALUE for use inside a double-quoted HTML attribute."
-  (let ((text (string-replace "&" "&amp;" value)))
-    (setq text (string-replace "\"" "&quot;" text))
-    (setq text (string-replace "<" "&lt;" text))
-    text))
+        (error "Denden: attribute alist %S has the entry %S, not (NAME . VALUE)"
+               attributes pair))))))
 
 (defun denden--serialize-attribute (pair)
-  "Serialize one canonical (NAME . VALUE) attribute PAIR. A nil VALUE omits
-it; t emits a bare boolean attribute."
-  (let ((name (symbol-name (car pair)))
-        (value (cdr pair)))
+  "Return the HTML text of the attribute PAIR, (NAME . VALUE).
+A nil VALUE leaves the attribute out and returns nil.  The value t
+writes NAME alone, as a boolean attribute such as hidden."
+  (pcase-let ((`(,name . ,value) pair))
     (cond
      ((null value) nil)
-     ((eq value t) name)
-     (t (format "%s=\"%s\"" name (denden--escape-attribute-value (format "%s" value)))))))
-
-(defun denden--serialize-attributes (attributes)
-  "Serialize canonical ATTRIBUTES alist to a leading-space-joined string."
-  (let ((parts (delq nil (mapcar #'denden--serialize-attribute attributes))))
-    (if parts (concat " " (string-join parts " ")) "")))
+     ((eq value t) (symbol-name name))
+     (t (format "%s=\"%s\"" name
+                (url-insert-entities-in-string (format "%s" value)))))))
 
 (defun denden-serialize-node (node)
-  "Serialize canonical dom.el NODE to an HTML string. A `raw-html' node emits
-its string verbatim, unescaped."
+  "Return the HTML text of NODE, a template node or a string.
+A string is escaped.  The node (raw-html nil STRING ...) returns its
+strings as they are.  Void elements such as img are written as
+<img />; every other element gets a closing tag.
+
+For example:
+
+  (denden-serialize-node \\='(p (:class \"note\") \"Hello\" (br nil)))
+  => \"<p class=\\\"note\\\">Hello<br /></p>\""
   (cond
-   ((stringp node) (denden--escape-text node))
-   ((eq (car node) 'raw-html) (mapconcat #'identity (cddr node) ""))
+   ((stringp node) (url-insert-entities-in-string node))
+   ((eq (car node) 'raw-html) (apply #'concat (cddr node)))
    (t
-    (cl-destructuring-bind (tag attributes . children) node
-      (let ((tag-name (symbol-name tag))
-            (attribute-string (denden--serialize-attributes attributes)))
-        (if (memq tag denden-void-elements)
-            (progn
-              (when children
-                (error "Denden: void element %s was given children %S"
-                       tag-name children))
-              (format "<%s%s />" tag-name attribute-string))
-          (format "<%s%s>%s</%s>"
-                  tag-name attribute-string
-                  (mapconcat #'denden-serialize-node children "")
-                  tag-name)))))))
+    (pcase-let* ((`(,tag ,attributes . ,children) node)
+                 (attribute-text
+                  (mapconcat (lambda (pair) (concat " " pair))
+                             (delq nil (mapcar #'denden--serialize-attribute
+                                               (denden--attribute-alist attributes)))
+                             ""))
+                 (children (delq nil children)))
+      (if (memq tag denden-void-elements)
+          (if children
+              (error "Denden: void element %s was given children %S" tag children)
+            (format "<%s%s />" tag attribute-text))
+        (format "<%s%s>%s</%s>" tag attribute-text
+                (mapconcat #'denden-serialize-node children "")
+                tag))))))
 
-;;;; One-shot HTML to template-form sexp converter
-;;
-;; A one-shot tool: convert an existing rendered HTML file into template-form
-;; sexp so it can be hand-edited into a denden template. `libxml-parse-
-;; html-region' hands back dom.el nodes with plain symbol tags and an alist
-;; of (symbol . string) attributes already; `denden-html-to-template'
-;; rewrites that attribute alist as a keyword plist to match the
-;; template-form convention and drops whitespace-only text-node children.
+;;;; Export backend
 
-(defun denden--attribute-symbol-to-keyword (symbol)
-  "Turn a plain attribute SYMBOL such as class into the keyword :class."
-  (intern (concat ":" (symbol-name symbol))))
+;; `denden-html' is Org's `html' backend with a few transcoders replaced.
+;; Its parse tree filter gives every heading a stable id before ox-html
+;; writes it, so the table of contents and links agree with the headings.  The link
+;; transcoder resolves links to other pages of the site, shows their
+;; current title, and records each page's links for backlinks.
 
-(defun denden--whitespace-only-string-p (text)
-  "Return non-nil if TEXT is a string containing only whitespace."
-  (and (stringp text) (string-match-p (rx bos (* (any " \t\n\r")) eos) text)))
+(defun denden-heading-id (text)
+  "Return a stable id for a heading with TEXT, such as \"getting-started\"."
+  (let* ((id (downcase text))
+         (id (replace-regexp-in-string (rx (+ (not (in "a-z0-9")))) "-" id))
+         (id (string-trim id (rx (+ "-")) (rx (+ "-")))))
+    (if (string-empty-p id) "section" id)))
 
-(defun denden-html-to-template (node)
-  "Convert libxml dom.el NODE into denden template-form sexp, dropping
-whitespace-only text nodes."
-  (cond
-   ((denden--whitespace-only-string-p node) nil)
-   ((stringp node) node)
-   (t (cl-destructuring-bind (tag attributes . children) node
-        (let ((plist (cl-loop for (name . value) in attributes
-                              append (list (denden--attribute-symbol-to-keyword name) value)))
-              (kept-children (delq nil (mapcar #'denden-html-to-template children))))
-          (append (list tag plist) kept-children))))))
-
-(defun denden-convert-html-string (html-string)
-  "Parse HTML-STRING and return its top-level node as template-form sexp."
-  (with-temp-buffer
-    (insert html-string)
-    (denden-html-to-template
-     (libxml-parse-html-region (point-min) (point-max)))))
-
-(defun denden-convert-html-file (file)
-  "Read FILE and return its contents as template-form sexp, for pasting into a
-template."
-  (with-temp-buffer
-    (insert-file-contents file)
-    (denden-html-to-template
-     (libxml-parse-html-region (point-min) (point-max)))))
-
-;;;; Derived ox-html backend
-;;
-;; Derives `denden-html' from `html' (`org-export-define-derived-backend'),
-;; overriding the transcoders headline, src-block, item, link and paragraph.
-;;
-;; Stable heading ids (honour :CUSTOM_ID: or :ID: when present, slugify the
-;; heading text otherwise, dedupe collisions with a numeric suffix) are NOT
-;; implemented by forking `org-html-headline'. That function is only one of
-;; roughly twenty call sites in ox-html.el that all resolve ids through the
-;; shared helper `org-html--reference' -- the table of contents and internal
-;; link resolution both call it directly, bypassing the headline transcoder
-;; entirely. `denden--advise-html-reference' fixes this once, for every
-;; consumer, by advising the shared helper instead.
-;;
-;; src-block binds `org-html-htmlize-output-type' to `css' for the duration,
-;; so highlighted code always comes out as CSS classes, never inline
-;; style="" colors. htmlize derives those classes from font-lock face
-;; names: `font-lock-keyword-face' strips the "font-lock-" prefix and the
-;; "-face" suffix, then gets `org-html-htmlize-font-prefix' ("org-" by
-;; default) applied, so it becomes .org-keyword. `denden-highlight-
-;; stylesheet' below turns a class-to-color alist into the CSS that gives
-;; those classes meaning; the site layer supplies the alist that points them
-;; at its own color tokens.
-
-(defvar denden--heading-ids nil
-  "Hash table of heading ids already used in the current export, reset per
-file.")
-
-
-(defun denden--reset-heading-ids (backend)
-  "Clear `denden--heading-ids' before an export with a denden-html BACKEND."
-  (when (org-export-derived-backend-p backend 'denden-html)
-    (setq denden--heading-ids (make-hash-table :test 'equal))))
-
-(add-hook 'org-export-before-parsing-functions #'denden--reset-heading-ids)
-
-(defun denden--slugify-heading-text (text)
-  "Slugify TEXT into a lowercase, hyphen-separated id, or \"section\" if
-nothing alphanumeric survives."
-  (let* ((slug (downcase text))
-         (slug (replace-regexp-in-string (rx (+ (not (any "a-z0-9")))) "-" slug))
-         (slug (replace-regexp-in-string (rx (or (seq bos (+ "-")) (seq (+ "-") eos))) "" slug)))
-    (if (string-empty-p slug) "section" slug)))
-
-(defun denden--unique-heading-id (candidate)
-  "Return CANDIDATE, or CANDIDATE with a numeric suffix if it repeats."
-  (unless denden--heading-ids
-    (setq denden--heading-ids (make-hash-table :test 'equal)))
-  (let ((seen-count (gethash candidate denden--heading-ids 0)))
-    (puthash candidate (1+ seen-count) denden--heading-ids)
-    (if (zerop seen-count) candidate (format "%s-%d" candidate (1+ seen-count)))))
-
-(defun denden-heading-id (datum)
-  "DATUM's stable HTML id: its :CUSTOM_ID or :ID if present, else a deduped
-slug. Caches the result on DATUM."
-  (or (org-element-property :denden-id datum)
-      (let* ((custom-id (org-element-property :CUSTOM_ID datum))
-             (id-property (org-element-property :ID datum))
-             (id (cond
-                  (custom-id (denden--unique-heading-id custom-id))
-                  (id-property (denden--unique-heading-id id-property))
-                  (t (denden--unique-heading-id
-                      (denden--slugify-heading-text
-                       (org-element-property :raw-value datum)))))))
-        (org-element-put-property datum :denden-id id)
-        id)))
-
-(defun denden--advise-html-reference (original-function datum info &optional named-only)
-  "Redirect headline and inlinetask id computation to `denden-heading-id',
-within a denden-html export only."
-  (if (and (memq (org-element-type datum) '(headline inlinetask))
-           (org-export-derived-backend-p (plist-get info :back-end) 'denden-html))
-      (denden-heading-id datum)
-    (funcall original-function datum info named-only)))
-
-(advice-add 'org-html--reference :around #'denden--advise-html-reference)
+(defun denden--prepare-tree (tree _backend _info)
+  "Give each heading of TREE a unique id.
+A heading keeps its CUSTOM_ID or ID property when it has one; other
+headings get an id from their text, with -2, -3 and so on added when
+two headings share it."
+  (let ((seen (make-hash-table :test #'equal)))
+    (org-element-map tree '(headline inlinetask)
+      (lambda (headline)
+        (let* ((id (or (org-element-property :CUSTOM_ID headline)
+                       (org-element-property :ID headline)
+                       (denden-heading-id (org-element-property :raw-value headline))))
+               (count (cl-incf (gethash id seen 0))))
+          (org-element-put-property headline :CUSTOM_ID
+                                    (if (= count 1) id (format "%s-%d" id count)))))))
+  tree)
 
 (defun denden-headline (headline contents info)
-  "Transcode HEADLINE like `org-html-headline', plus a # link to its own id."
-  (let ((html (org-html-headline headline contents info)))
-    (if (string-match (rx "<h" (group (any "2-6")) " id=\"" (group (+ (not (any "\"")))) "\""
-                          (* (not (any ">"))) ">" (*? anything) (group "</h" (backref 1) ">"))
-                      html)
-        (replace-match (format "<a class=\"heading-anchor\" href=\"#%s\" aria-label=\"Link to this section\">#</a></h%s>"
-                               (match-string 2 html) (match-string 1 html))
-                       t t html 3)
-      html)))
+  "Transcode HEADLINE with CONTENTS and INFO, adding a link to its id.
+The link sits at the end of the heading, so a reader can copy the
+address of a section.  See `denden-heading-anchor-text'."
+  (let* ((html (org-html-headline headline contents info))
+         (level (+ (org-export-get-relative-level headline info)
+                   (1- (plist-get info :html-toplevel-hlevel))))
+         (closing (format "</h%d>" level))
+         (position (string-search closing html)))
+    (if (or (not denden-heading-anchor-text)
+            (org-export-low-level-p headline info)
+            (> level 6)
+            (not position))
+        html
+      (concat (substring html 0 position)
+              (denden-serialize-node
+               `(a (:class "heading-anchor"
+                           :href ,(concat "#" (org-element-property :CUSTOM_ID headline))
+                           :aria-label ,denden-heading-anchor-label)
+                   ,denden-heading-anchor-text))
+              (substring html position)))))
 
 (defun denden-src-block (src-block contents info)
-  "Transcode SRC-BLOCK like `org-html-src-block', but always as CSS classes,
-never inline style colors."
-  (let ((org-html-htmlize-output-type 'css)
+  "Transcode SRC-BLOCK with CONTENTS and INFO, coloured as chosen.
+`denden-code-highlighting' says how code is coloured.  The block
+takes keyboard focus, so a reader can scroll a wide block without a
+mouse."
+  (let ((org-html-htmlize-output-type denden-code-highlighting)
         (org-html-htmlize-font-prefix "org-"))
-    ;; tabindex lets a keyboard scroll a wide block (WCAG 2.1.1).
     (string-replace "<pre " "<pre tabindex=\"0\" "
                     (org-html-src-block src-block contents info))))
 
-(defun denden-highlight-stylesheet (class-color-alist)
-  "Return a CSS stylesheet string from CLASS-COLOR-ALIST, entries of
-(CLASS-NAME . COLOR-VALUE)."
-  (mapconcat
-   (lambda (entry) (format ".%s { color: %s; }" (car entry) (cdr entry)))
-   class-color-alist
-   "\n"))
+(defun denden-link-label (site url)
+  "Return URL as short text for a link that has no description.
+The text is the host without \"www.\" and the path without a final
+slash.  Then each (REGEXP . REPLACEMENT) of the link label rules of
+SITE is applied in order, such as a rule that turns
+\"github.com/user\" into \"github:user\"."
+  (let* ((parsed (url-generic-parse-url url))
+         (host (string-remove-prefix "www." (or (url-host parsed) "")))
+         (target (let ((target (url-target parsed)))
+                   ;; A "#:~:text=" fragment only tells the browser what to
+                   ;; highlight, so it is not part of the label.
+                   (and target (substring target 0 (string-search ":~:" target)))))
+         (label (decode-coding-string
+                 (url-unhex-string
+                  (concat host
+                          (string-remove-suffix "/" (or (url-filename parsed) ""))
+                          (and target (not (string-empty-p target))
+                               (concat "#" target))))
+                 'utf-8)))
+    (dolist (rule (denden-site-link-label-rules site) label)
+      (setq label (replace-regexp-in-string (car rule) (cdr rule) label t)))))
 
-(defun denden-item (item contents info)
-  "Transcode ITEM like `org-html-item'. A placeholder for a future inline
-list-item convention."
-  (org-html-item item contents info))
+(defun denden--link-target (path pages)
+  "Return the target of PATH, the path of an internal link, as a site URL.
+PATH is either a site path such as /log/x/ or a relative Org file
+such as other.org.  When it names a page of PAGES, return that page;
+otherwise return the URL it names, which the build checks later."
+  (if (string-prefix-p "/" path)
+      (let ((url (string-remove-prefix "/" (string-remove-suffix ".html" path))))
+        (or (seq-find (lambda (page)
+                        (equal (string-remove-suffix "/" (denden-page-url page))
+                               (string-remove-suffix "/" url)))
+                      pages)
+            url))
+    ;; The export binds `default-directory' to the folder of the text.
+    (or (denden-page-for-source (expand-file-name path) pages)
+        path)))
 
-(defun denden--resolve-site-path (raw-path all-pages)
-  "Resolve RAW-PATH, a bare site-root [[/path]] link, against ALL-PAGES's :url
-values. Return the matching page or nil."
-  (let ((key (string-trim-left
-              (string-trim-right (string-trim-right raw-path (rx ".html" eos)) "/")
-              "/")))
-    (seq-find (lambda (p) (equal (string-trim-right (plist-get p :url) "/") key)) all-pages)))
-
-(defun denden--resolve-relative-file-link (raw-path current-file all-pages)
-  "Resolve RAW-PATH, a same-directory-style [[file:other.org]] link written
-relative to CURRENT-FILE, against ALL-PAGES's :source values. Return the
-matching page, or nil if CURRENT-FILE is unknown or nothing matches."
-  (when current-file
-    (let ((absolute (expand-file-name raw-path (file-name-directory current-file))))
-      (seq-find (lambda (p) (equal (plist-get p :source) absolute)) all-pages))))
-
-
-(defun denden--strip-file-uri-prefix (html)
-  "HTML with any \"file://\" prefix removed from a site-root-absolute href or
-src."
-  (replace-regexp-in-string
-   (rx (group (or "href" "src")) "=\"file://" (group "/" (* (not (any "\"")))) "\"")
-   "\\1=\"\\2\"" html))
-
-(defconst denden--href-or-src-attribute-regexp
-  (rx (group (or "href" "src")) "=\"" (group (* (not (any "\"")))) "\"")
-  "Match an href or src attribute, capturing its name and value.")
-
-(defun denden--escape-attribute-ampersands (html)
-  "HTML with a bare & inside any href or src attribute value escaped to &amp;."
-  (replace-regexp-in-string
-   denden--href-or-src-attribute-regexp
-   (lambda (whole)
-     (string-match denden--href-or-src-attribute-regexp whole)
-     (format "%s=\"%s\"" (match-string 1 whole)
-             (replace-regexp-in-string
-              (rx "&" (opt (group (or "amp;" "lt;" "gt;" "quot;"
-                                      (seq "#" (+ digit) ";")
-                                      (seq "#x" (+ hex) ";")))))
-              (lambda (entity) (if (> (length entity) 1) entity "&amp;"))
-              (match-string 2 whole))))
-   html))
-
-(defun denden--enhance-images (html)
-  "HTML with every <img> lazy and async, unless it sets loading itself."
-  (replace-regexp-in-string
-   (rx "<img" (* (not (any ">"))) ">")
-   (lambda (tag)
-     (if (string-search "loading=" tag)
-         tag
-       (concat "<img" (string-trim-right (substring tag 4 -1) (rx (* (any " /"))))
-               " loading=\"lazy\" decoding=\"async\" />")))
-   html t t))
-
-(defun denden--fix-link-html (html)
-  "HTML with file: prefixes stripped, ampersands escaped, images enhanced."
-  (denden--enhance-images (denden--escape-attribute-ampersands (denden--strip-file-uri-prefix html))))
+(defun denden--record-external-link (link page)
+  "Add LINK, a link to another site, to the external links of PAGE."
+  (let* ((url (org-element-property :raw-link link))
+         (text (and (org-element-contents link)
+                    (string-trim (org-no-properties
+                                  (org-link-display-format
+                                   (org-element-interpret-data
+                                    (org-element-contents link))))))))
+    (unless (assoc url (denden-page-external-links page))
+      (push (cons url (and text (not (string-empty-p text)) text))
+            (denden-page-external-links page)))))
 
 (defun denden-link (link contents info)
-  "Transcode LINK like `org-html-link', but a resolvable [[/path]] link, or a
-same-directory [[file:other.org]] link to a known page, uses the target
-page's live title as text and its real pretty URL as href."
+  "Transcode LINK with CONTENTS and INFO, resolving links between pages.
+A link to another page, written as [[file:other.org]] or
+[[/log/other/]], points to that page's URL and shows its current
+title, unless its description has markup.  Every internal link is
+recorded in the page, so the build can check it and find backlinks.
+A bare URL to another site shows `denden-link-label' as its text."
   (let* ((type (org-element-property :type link))
-         (raw-path (org-element-property :path link))
-         (all-pages (plist-get info :denden-all-pages))
-         (plain-description-p (not (and contents (string-search "<" contents)))))
-    (cond
-     ((and all-pages (equal type "file") (string-prefix-p "/" raw-path) plain-description-p)
-      (let ((target (denden--resolve-site-path raw-path all-pages)))
-        (if target
-            (format "<a href=\"%s\">%s</a>" raw-path (org-html-encode-plain-text (plist-get target :title)))
-          (denden--fix-link-html (org-html-link link contents info)))))
-     ((and all-pages (equal type "file") (not (file-name-absolute-p raw-path)) plain-description-p)
-      (let ((target (denden--resolve-relative-file-link
-                     raw-path (plist-get info :denden-current-file) all-pages)))
-        (if target
-            (format "<a href=\"/%s\">%s</a>" (plist-get target :url)
-                    (org-html-encode-plain-text (plist-get target :title)))
-          (denden--fix-link-html (org-html-link link contents info)))))
-     (t (denden--fix-link-html (org-html-link link contents info))))))
+         (path (org-element-property :path link))
+         (page (plist-get info :denden-page))
+         (target (and (equal type "file")
+                      (or (string-prefix-p "/" path) (string-suffix-p ".org" path))
+                      (denden--link-target path (plist-get info :denden-pages)))))
+    (when (and page target)
+      (cl-pushnew (if (denden-page-p target) (denden-page-url target) target)
+                  (denden-page-links page) :test #'equal))
+    (when (and page (member type '("http" "https")))
+      (denden--record-external-link link page))
+    (if (denden-page-p target)
+        (format "<a href=\"/%s\">%s</a>"
+                (denden-page-url target)
+                (if (and contents (string-search "<" contents))
+                    contents
+                  (org-html-encode-plain-text (denden-page-title target))))
+      (let ((bare (and (member type '("http" "https"))
+                       (or (null contents)
+                           (equal (string-trim contents)
+                                  (org-element-property :raw-link link))))))
+        (denden--lazy-image
+         ;; ox-html writes a site path such as /images/a.png as file:///images/a.png.
+         (string-replace
+          "\"file:///" "\"/"
+          (org-html-link link
+                         (if bare
+                             (org-html-encode-plain-text
+                              (denden-link-label (plist-get info :denden-site)
+                                                 (org-element-property :raw-link link)))
+                           contents)
+                         info)))))))
 
-(defconst denden-callout-types '(("note" . "Note") ("tip" . "Tip") ("warn" . "Warning"))
-  "Callout special-block types and their visible labels.")
+(defun denden--lazy-image (html)
+  "Return HTML with lazy loading added when it is a single img tag.
+The browser then loads the image only when it comes near the screen.
+An img that sets loading itself, through #+attr_html:, is kept.  See
+`denden-lazy-images'."
+  (if (and denden-lazy-images
+           (string-prefix-p "<img " html)
+           (string-suffix-p ">" html)
+           (not (string-search " loading=" html)))
+      (concat (string-remove-suffix ">" html) " loading=\"lazy\" decoding=\"async\">")
+    html))
+
+(defun denden-paragraph (paragraph contents info)
+  "Transcode PARAGRAPH with CONTENTS and INFO, with figure numbers as chosen.
+See `denden-figure-numbers'."
+  (let ((html (org-html-paragraph paragraph contents info)))
+    (if denden-figure-numbers
+        html
+      (replace-regexp-in-string
+       (rx "<span class=\"figure-number\">" (+ (not (in "<"))) "</span>")
+       "" html t t))))
 
 (defun denden-special-block (special-block contents info)
-  "Transcode SPECIAL-BLOCK as a labelled callout if its type is a callout."
+  "Transcode SPECIAL-BLOCK with CONTENTS and INFO, showing callouts.
+A block whose type is one of the site's callout types, such as
+#+begin_note, becomes a labelled note; any other block is written
+as ox-html writes it."
   (let* ((type (downcase (org-element-property :type special-block)))
-         (label (cdr (assoc type denden-callout-types))))
+         (label (cdr (assoc type (denden-site-callout-types
+                                  (plist-get info :denden-site))))))
     (if label
-        (format "<div class=\"callout\" role=\"note\" data-callout=\"%s\">\n<p>%s</p>\n%s</div>"
+        (format (concat "<div class=\"callout\" role=\"note\" data-callout=\"%s\">\n"
+                        "<p>%s</p>\n%s</div>")
                 type label (or contents ""))
       (org-html-special-block special-block contents info))))
 
-(defconst denden-html-default-options
-  '(:with-broken-links mark :with-toc nil :section-numbers nil)
-  "Ext-plist every denden-html export call should pass; turns off ox-html's
-default table of contents and section numbers.")
-
-
-(defun denden-export-options-with-pages (all-pages &optional current-file)
-  "`denden-html-default-options' plus :denden-all-pages ALL-PAGES and
-:denden-current-file CURRENT-FILE, for `denden-link's [[/path]] and
-same-directory [[file:other.org]] resolution."
-  (append denden-html-default-options
-          (list :denden-all-pages all-pages :denden-current-file current-file)))
-
-(defun denden-paragraph (paragraph contents info)
-  "Transcode PARAGRAPH like `org-html-paragraph', dropping the \"Figure N:\"
-caption prefix and fixing image src."
-  (denden--fix-link-html
-   (replace-regexp-in-string
-    (rx "<span class=\"figure-number\">Figure " (+ digit) ":" (* " ") "</span>")
-    ""
-    (org-html-paragraph paragraph contents info))))
-
 (org-export-define-derived-backend 'denden-html 'html
-  :translate-alist
-  '((headline . denden-headline)
-    (item . denden-item)
-    (link . denden-link)
-    (paragraph . denden-paragraph)
-    (special-block . denden-special-block)
-    (src-block . denden-src-block)))
+  :translate-alist '((headline . denden-headline)
+                     (link . denden-link)
+                     (paragraph . denden-paragraph)
+                     (special-block . denden-special-block)
+                     (src-block . denden-src-block))
+  :filters-alist '((:filter-parse-tree . denden--prepare-tree)))
 
-;;;; Build driver on top of ox-publish
-;;
-;; Wires ox-publish's own project/publish/cache machinery to the
-;; denden-html backend, and adds the one thing ox-publish has no equivalent
-;; for: a sweep step that deletes output files a build no longer writes.
-;; Async building reuses `org-export-async-start' directly rather than
-;; `org-publish-all', so the sweep can run inside the child process too,
-;; after publishing finishes there.
+(defun denden--export-options (site page pages)
+  "Return the export options for PAGE of SITE, given all PAGES.
+PAGE may be nil when exporting a fragment."
+  (list :with-toc nil
+        :section-numbers nil
+        :headline-levels 6
+        ;; Org's own links to headings: mark a broken one, or stop.
+        :with-broken-links (and (not (eq denden-broken-link-action 'error)) 'mark)
+        :html-doctype "html5"
+        :html-html5-fancy t
+        :html-checkbox-type 'html
+        :denden-site site
+        :denden-page page
+        :denden-pages pages))
 
-(setq org-export-async-init-file
-      (expand-file-name "denden-async-init.el" denden-repository-directory))
+(defvar denden-current-site nil
+  "The site whose page is being exported, or nil outside an export.
+Code blocks in a page can read it, with `denden-current-page' and
+`denden-current-pages', to show data from the site, for example:
 
-(defun denden-publish-to-html (plist filename _pub-dir)
-  "Publish FILENAME with the denden-html backend to its pretty-URL path, with
-no site chrome."
-  (let ((output (denden-output-file-for filename (cons nil plist))))
-    (make-directory (file-name-directory output) t)
-    (with-temp-file output
-      (insert (with-temp-buffer
-                (insert-file-contents filename)
-                (org-mode)
-                (org-export-as 'denden-html nil nil nil plist))))
-    output))
+  #+begin_src emacs-lisp :exports results :results value html
+    (denden-serialize-node
+     (denden-render-page-list
+      (seq-take (denden-sort-pages-by-date denden-current-pages) 3)))
+  #+end_src
 
-(defun denden-slugify-path (relative-path)
-  "RELATIVE-PATH with every \"/\"-separated component slugified to lowercase
-[a-z0-9-], Hugo-style."
-  (mapconcat
-   (lambda (component)
-     (let* ((lower (downcase component))
-            (hyphenated (replace-regexp-in-string (rx (+ (any " _"))) "-" lower))
-            (stripped (replace-regexp-in-string (rx (not (any "a-z0-9-"))) "" hyphenated))
-            (collapsed (replace-regexp-in-string (rx (>= 2 "-")) "-" stripped)))
-       (string-trim collapsed (rx (+ "-")) (rx (+ "-")))))
-   (split-string relative-path "/") "/"))
+These variables are bound only while a page exports.")
 
-(defun denden--pretty-output-relative-path (slugged)
-  "Map SLUGGED, an already-slugified relative path, to its pretty-URL output
-shape."
-  (if (equal (file-name-nondirectory slugged) "index")
-      slugged
-    (concat (file-name-as-directory slugged) "index")))
+(defvar denden-current-page nil
+  "The page being exported, or nil.  See `denden-current-site'.")
 
-(defun denden-output-file-for (source-file project)
-  "Return the absolute output path SOURCE-FILE maps to under PROJECT. Custom
-publishing functions must call this, not `org-export-output-file-name'."
-  (let* ((base-dir (file-name-as-directory (org-publish-property :base-directory project)))
-         (pub-dir (file-name-as-directory (org-publish-property :publishing-directory project)))
-         (relative (file-relative-name source-file base-dir))
-         (output-extension (org-publish-property :denden-output-extension project))
-         (no-ext (file-name-sans-extension relative))
-         ;; An _index.org names a section/site index, mapping to that
-         ;; directory's plain index.html, not a literal _index.html.
-         (index-fixed (if (equal (file-name-nondirectory no-ext) "_index")
-                          (concat (or (file-name-directory no-ext) "") "index")
-                        no-ext))
-         (slugged (denden-slugify-path index-fixed))
-         (pretty (denden--pretty-output-relative-path slugged)))
-    (expand-file-name (if output-extension (concat pretty output-extension) relative) pub-dir)))
+(defvar denden-current-pages nil
+  "All pages of the site being exported, or nil.  See `denden-current-site'.")
 
-(defun denden-pretty-url (output-relative-path)
-  "Render OUTPUT-RELATIVE-PATH as a pretty-URL href: its directory portion,
-trailing slash kept."
-  (string-remove-suffix "index.html" output-relative-path))
-
-
-(defun denden-expected-output-files (leaf-projects)
-  "Return the output paths LEAF-PROJECTS should produce, one per source file."
-  (let (files)
-    (dolist (project leaf-projects)
-      (dolist (source (org-publish-get-base-files project))
-        (push (denden-output-file-for source project) files)))
-    files))
-
-(defun denden-sweep-output-directory (pub-dir expected-files)
-  "Delete every file under PUB-DIR absent from EXPECTED-FILES, and any
-directory left empty by it."
-  (let ((expected (mapcar #'expand-file-name expected-files)))
-    (dolist (file (directory-files-recursively pub-dir (rx (* nonl)) nil))
-      (unless (member (expand-file-name file) expected)
-        (delete-file file)))
-    (dolist (dir (sort (directory-files-recursively pub-dir (rx (* nonl)) t)
-                       (lambda (a b) (> (length a) (length b)))))
-      (when (and (file-directory-p dir)
-                 (null (directory-files dir nil directory-files-no-dot-files-regexp)))
-        (delete-directory dir)))))
-
-(defun denden-sweep-projects (leaf-projects)
-  "Sweep every :publishing-directory LEAF-PROJECTS writes to."
-  (let ((by-dir (make-hash-table :test 'equal)))
-    (dolist (leaf leaf-projects)
-      (let ((dir (file-name-as-directory (org-publish-property :publishing-directory leaf))))
-        (puthash dir (cons leaf (gethash dir by-dir)) by-dir)))
-    (maphash
-     (lambda (dir leaves)
-       (when (file-directory-p dir)
-         (denden-sweep-output-directory dir (denden-expected-output-files leaves))))
-     by-dir)))
-
-(defun denden-build-project (project &optional force)
-  "Build PROJECT synchronously, then sweep its output. With FORCE, ignore
-ox-publish's timestamp cache."
-  (let ((leaves (org-publish-expand-projects (list project)))
-        (coding-system-for-read 'utf-8-unix)
-        (coding-system-for-write 'utf-8-unix))
-    (save-window-excursion
-      (let ((org-publish-use-timestamps-flag (not force)))
-        (when force (org-publish-remove-all-timestamps))
-        (org-publish-projects leaves)))
-    (denden-sweep-projects leaves)))
-
-(defun denden-build-project-async (project &optional force)
-  "Build PROJECT in a separate Emacs process, then sweep there. Returns as
-soon as the child process starts."
-  (let ((leaves (org-publish-expand-projects (list project))))
-    (org-export-async-start
-        (lambda (_) nil)
-      `(let ((org-publish-use-timestamps-flag ,(not force)))
-         (when ',force (org-publish-remove-all-timestamps))
-         (org-publish-projects ',leaves)
-         (denden-sweep-projects ',leaves)))))
-
-(defvar denden--git-lastmod-table nil
-  "A `denden-git-lastmod-table' result, let-bound around a single build call
-so `denden-git-lastmod' reads it instead of spawning one `git log' call
-per file. Function-scoped only: never set this globally, since a
-session-wide cache can go stale between builds.")
-
-(defun denden-git-lastmod-table (repository-directory)
-  "Return a hash-table mapping every git-tracked file under
-REPOSITORY-DIRECTORY to its last commit date (\"YYYY-MM-DD\"), via one
-`git log' call instead of one per file."
-  (let ((default-directory repository-directory)
-        (table (make-hash-table :test 'equal))
-        (date nil))
-    (with-temp-buffer
-      (when (zerop (call-process "git" nil t nil "log" "--name-only" "--format=commit:%cs"))
-        (goto-char (point-min))
-        (while (not (eobp))
-          (let ((line (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
-            (cond
-             ((string-prefix-p "commit:" line) (setq date (substring line 7)))
-             ((string-empty-p line))
-             (t (let ((path (expand-file-name line repository-directory)))
-                  (unless (gethash path table) (puthash path date table))))))
-          (forward-line 1))))
-    table))
-
-(defun denden-git-lastmod (file)
-  "Return FILE's last commit date as \"YYYY-MM-DD\", or nil if it has no git
-history. Reads `denden--git-lastmod-table' when a build has let-bound one,
-else spawns its own `git log' call for just FILE."
-  (if denden--git-lastmod-table
-      (gethash (expand-file-name file) denden--git-lastmod-table)
-    (let ((default-directory (file-name-directory file)))
-      (with-temp-buffer
-        (when (zerop (call-process "git" nil t nil "log" "-1" "--format=%cs"
-                                   "--" (file-name-nondirectory file)))
-          (let ((output (string-trim (buffer-string))))
-            (unless (string-empty-p output) output)))))))
-
-(defun denden--org-date-to-iso (date-string)
-  "Convert org timestamp DATE-STRING, e.g. \"[2024-02-03 Sat]\", to
-\"2024-02-03\". Nil in, nil out."
-  (and date-string (format-time-string "%Y-%m-%d" (org-time-string-to-time date-string))))
-
-(defun denden-format-iso-date (iso-date format-string)
-  "Render ISO-DATE (\"YYYY-MM-DD\") via FORMAT-STRING (`format-time-string'
-syntax). Returns \"\" if ISO-DATE is nil."
-  (if (and iso-date (string-match
-                     (rx bos (group (= 4 digit)) "-" (group (= 2 digit)) "-" (group (= 2 digit)) eos)
-                     iso-date))
-      (format-time-string format-string
-                          (encode-time 0 0 0 (string-to-number (match-string 3 iso-date))
-                                       (string-to-number (match-string 2 iso-date))
-                                       (string-to-number (match-string 1 iso-date))))
-    ""))
-
-(defun denden--relative-path-section (relative-path)
-  "Return RELATIVE-PATH's top-level directory, or \"\" if it has none."
-  (if (string-search "/" relative-path) (car (split-string relative-path "/")) ""))
-
-(defun denden--source-section (source base-dir)
-  "Return SOURCE's top-level directory relative to BASE-DIR, or \"\" when
-SOURCE sits directly in it."
-  (denden--relative-path-section (file-relative-name source base-dir)))
-
-(defun denden-file-keyword-true-p (file keyword)
-  "Return non-nil if FILE's #+KEYWORD: value is \"t\" or \"true\" (case
-insensitive)."
-  (let ((value (cadr (assoc keyword (with-temp-buffer
-                                      (insert-file-contents file)
-                                      (org-mode)
-                                      (org-collect-keywords (list keyword)))))))
-    (and value (member (downcase value) '("t" "true")))))
-
-(defun denden-file-is-draft-p (file)
-  "Return non-nil if FILE's #+draft: keyword is true."
-  (denden-file-keyword-true-p file "DRAFT"))
-
-(defun denden-draft-exclude-regexp (base-directory)
-  "An org-publish :exclude regexp matching every #+draft: t file under
-BASE-DIRECTORY, or nil if there are none."
-  (let ((drafts (seq-filter #'denden-file-is-draft-p
-                            (directory-files-recursively base-directory (rx ".org" eos)))))
-    (when drafts
-      (rx-to-string (cons 'or (mapcar (lambda (file) (file-relative-name file base-directory)) drafts)) t))))
-
-(defun denden-sort-pages-by-date-desc (pages)
-  "Return PAGES sorted by :date descending; a page with no :date sorts last."
-  (sort (copy-sequence pages)
-        (lambda (a b) (string> (or (plist-get a :date) "") (or (plist-get b :date) "")))))
-
-(defun denden-sort-pages-by-title (pages)
-  "Return PAGES sorted by :title ascending, case-insensitively."
-  (sort (copy-sequence pages)
-        (lambda (a b) (string< (downcase (plist-get a :title)) (downcase (plist-get b :title))))))
-
-(defun denden-page-lastmod (page)
-  "Return PAGE's Lastmod: `denden-git-lastmod' on its :source, or its :date."
-  (or (denden-git-lastmod (plist-get page :source)) (plist-get page :date)))
-
-(defun denden-html-word-count (html)
-  "Return HTML's word count: strip tags, then split on whitespace."
-  (let ((text (with-temp-buffer
-                (insert html)
-                (goto-char (point-min))
-                (while (re-search-forward (rx "<" (+ (not (any ">"))) ">") nil t) (replace-match " "))
-                (buffer-string))))
-    (length (split-string text nil t))))
-
-(defun denden--file-word-count (file)
-  "Return the word count of FILE's exported body, via a cheap ascii export
-so metadata collection doesn't pay for a second full HTML/htmlize pass."
-  (length
-   (split-string
-    (with-temp-buffer
-      (insert-file-contents file)
-      (org-mode)
-      (org-export-as 'ascii nil nil t '(:with-toc nil :with-broken-links mark)))
-    nil t)))
-
-(defun denden--list-keyword-value (keywords name)
-  "Return NAME's #+KEYWORD: value from KEYWORDS, split into a list on
-whitespace. Checks plain NAME first, then NAME followed by \"[]\", the old
-Hugo/go-org array convention kept only for backward compatibility."
-  (split-string (or (cadr (assoc name keywords))
-                    (cadr (assoc (concat name "[]") keywords))
-                    "")))
-
-(defun denden-collect-page-metadata (leaf-projects)
-  "Return a metadata plist for every page LEAF-PROJECTS publish, one per
-source file."
-  (let (pages)
-    (dolist (project leaf-projects)
-      (when (org-publish-property :denden-output-extension project)
-        (let ((base-dir (file-name-as-directory (org-publish-property :base-directory project)))
-              (pub-dir (file-name-as-directory (org-publish-property :publishing-directory project))))
-          (dolist (source (org-publish-get-base-files project))
-            (let* ((links nil)
-                   (keywords (with-temp-buffer
-                               (insert-file-contents source)
-                               (org-mode)
-                               (setq links (denden--internal-link-paths))
-                               (org-collect-keywords '("TITLE" "TAGS" "TAGS[]" "REFS" "REFS[]"
-                                                       "DATE" "ALIASES" "ALIASES[]"))))
-                   (output (denden-output-file-for source project))
-                   (word-count (denden--file-word-count source)))
-              (push (list :url (denden-pretty-url (file-relative-name output pub-dir))
-                          :title (or (cadr (assoc "TITLE" keywords)) (file-name-base source))
-                          :tags (denden--list-keyword-value keywords "TAGS")
-                          :refs (denden--list-keyword-value keywords "REFS")
-                          :date (denden--org-date-to-iso (cadr (assoc "DATE" keywords)))
-                          :section (denden--source-section source base-dir)
-                          :source source
-                          :aliases (denden--list-keyword-value keywords "ALIASES")
-                          :links links
-                          :wordcount word-count
-                          :readingtime (max 1 (round (/ word-count 200.0))))
-                    pages))))))
-    (nreverse pages)))
-
-(defun denden--internal-link-paths ()
-  "Return the Org buffer's internal link targets: .org file paths and /site paths."
-  ;; A real parse, so links shown inside src or example blocks do not count.
-  (delete-dups
-   (org-element-map (org-element-parse-buffer) 'link
-     (lambda (link)
-       (let ((path (org-element-property :path link)))
-         (and (equal (org-element-property :type link) "file")
-              (or (string-suffix-p ".org" path) (string-prefix-p "/" path))
-              path))))))
-
-(defun denden--link-points-at-page-p (path linking-page target-page)
-  "Non-nil if PATH, a link written in LINKING-PAGE, points at TARGET-PAGE."
-  (if (string-suffix-p ".org" path)
-      (equal (expand-file-name path (file-name-directory (plist-get linking-page :source)))
-             (plist-get target-page :source))
-    (equal (string-trim (string-trim-right path (rx ".html" eos)) "/" "/")
-           (string-trim (plist-get target-page :url) "/" "/"))))
-
-(defun denden-backlinks (page all-pages)
-  "Return the pages in ALL-PAGES whose internal links point at PAGE, newest first."
-  (denden-sort-pages-by-date-desc
-   (seq-filter (lambda (other)
-                 (and (not (eq other page)) (plist-get other :source)
-                      (seq-some (lambda (path) (denden--link-points-at-page-p path other page))
-                                (plist-get other :links))))
-               all-pages)))
-
-(defun denden-pages-in-section (pages section)
-  "Return only the PAGES whose :section is SECTION."
-  (seq-filter (lambda (page) (equal (plist-get page :section) section)) pages))
-
-(defun denden-pages-with-tag (pages tag)
-  "Return only the PAGES whose :tags include TAG."
-  (seq-filter (lambda (page) (member tag (plist-get page :tags))) pages))
-
-(defun denden-group-pages-by-year (pages)
-  "Group page-metadata PAGES by the year of :date, newest year and page first.
-A page with no :date groups under \"\"."
-  (let* ((sorted (denden-sort-pages-by-date-desc pages))
-         (groups nil))
-    (dolist (page sorted)
-      (let ((year (if (plist-get page :date) (substring (plist-get page :date) 0 4) "")))
-        (if (and groups (equal (caar groups) year))
-            (setcdr (car groups) (cons page (cdar groups)))
-          (push (cons year (list page)) groups))))
-    (mapcar (lambda (group) (cons (car group) (nreverse (cdr group)))) (nreverse groups))))
-
-(defun denden--taxonomy-counts (pages field)
-  "Return (:tag :count) plists for every value across PAGES's FIELD (:tags or
-:refs), sorted by count then name."
-  (let ((counts (make-hash-table :test 'equal)))
-    (dolist (page pages)
-      (dolist (value (plist-get page field))
-        (puthash value (1+ (gethash value counts 0)) counts)))
-    (let (result)
-      (maphash (lambda (value count) (push (list :tag value :count count) result)) counts)
-      (sort result (lambda (a b)
-                     (if (= (plist-get a :count) (plist-get b :count))
-                         (string< (plist-get a :tag) (plist-get b :tag))
-                       (> (plist-get a :count) (plist-get b :count))))))))
-
-(defun denden-tag-counts (pages)
-  "Return (:tag :count) plists for every tag across PAGES's :tags, sorted by
-count then name."
-  (denden--taxonomy-counts pages :tags))
-
-(defun denden-ref-counts (pages)
-  "Return (:tag :count) plists for every value across PAGES's :refs, same
-shape as `denden-tag-counts'."
-  (denden--taxonomy-counts pages :refs))
-
-(defun denden-collect-body-links (body-html)
-  "Return deduped (:href :text :internal) plists for http(s):// and /-prefixed
-links in BODY-HTML."
-  (let ((dom (with-temp-buffer (insert body-html) (libxml-parse-html-region (point-min) (point-max))))
-        (seen (make-hash-table :test 'equal))
-        (refs nil))
-    (dolist (a (dom-by-tag dom 'a))
-      (let ((href (dom-attr a 'href)))
-        (when (and href
-                   (or (string-prefix-p "http://" href) (string-prefix-p "https://" href)
-                       (string-prefix-p "/" href))
-                   (not (gethash href seen)))
-          (puthash href t seen)
-          (push (list :href href
-                      :text (string-trim (replace-regexp-in-string denden-whitespace-run-regexp " " (dom-texts a)))
-                      :internal (string-prefix-p "/" href))
-                refs))))
-    (nreverse refs)))
-
-(defun denden-pages-with-ref (pages ref)
-  "Return only the PAGES whose :refs include REF."
-  (seq-filter (lambda (page) (member ref (plist-get page :refs))) pages))
-
-(defun denden--item-link (item)
-  "Return the link inside ITEM's :tag secondary string, or nil."
-  (car (org-element-map (org-element-property :tag item) 'link #'identity)))
-
-(defun denden--link-text (link)
-  "Return LINK's bracket description as raw text, or its raw-link if none."
-  (let ((begin (org-element-property :contents-begin link))
-        (end (org-element-property :contents-end link)))
-    (if (and begin end) (string-trim (buffer-substring-no-properties begin end))
-      (org-element-property :raw-link link))))
-
-(defun denden-export-org-fragment (text)
-  "Export TEXT, a raw Org inline fragment, to HTML via denden-html, with the
-wrapping <p> stripped."
-  (if (string-empty-p text)
-      text
-    (let ((html (string-trim (org-export-string-as text 'denden-html t denden-html-default-options))))
-      (if (and (string-prefix-p "<p>" html) (string-suffix-p "</p>" html))
-          (substring html 3 -4)
-        html))))
-
-(defun denden-parse-topic-item (item)
-  "Return (:url :name :desc :parts) for descriptive-list ITEM, split on \" |
-\" in its body."
-  (let* ((link (denden--item-link item))
-         (begin (org-element-property :contents-begin item))
-         (end (org-element-property :contents-end item))
-         (raw (if (and begin end) (string-trim (buffer-substring-no-properties begin end)) ""))
-         (segments (mapcar #'string-trim (split-string raw " | "))))
-    (list :url (if link (org-element-property :raw-link link) "")
-          :name (if link (denden--link-text link) "")
-          :desc (denden-export-org-fragment (or (car segments) ""))
-          :parts (cdr segments))))
-
-(defun denden--topic-list-group (headline)
-  "Build one (:label :items) group plist from HEADLINE."
-  (list :label (org-element-property :raw-value headline)
-        :items (seq-mapcat
-                (lambda (plain-list)
-                  (if (eq (org-element-property :type plain-list) 'descriptive)
-                      (mapcar #'denden-parse-topic-item (org-element-map plain-list 'item #'identity))
-                    nil))
-                (org-element-map (org-element-contents headline) 'plain-list #'identity
-                                 nil nil 'headline))))
-
-(defun denden-parse-topic-list (file)
-  "Parse FILE (a #+layout: topic-list content file) into (:label :items)
-groups, one per top-level heading."
+(defun denden--export-text (text directory options)
+  "Return the body HTML of the Org TEXT, exported with OPTIONS.
+DIRECTORY is the folder relative links and #+INCLUDE: files are
+read from.  While it exports, `denden-current-site' and its two
+companions hold the site, the page and the pages from OPTIONS."
   (with-temp-buffer
-    (insert-file-contents file)
-    (org-mode)
-    (org-element-map (org-element-parse-buffer) 'headline #'denden--topic-list-group nil nil 'headline)))
+    (insert text)
+    (let* ((default-directory (file-name-as-directory directory))
+           (site (plist-get options :denden-site))
+           (denden-current-site site)
+           (denden-current-page (plist-get options :denden-page))
+           (denden-current-pages (plist-get options :denden-pages))
+           (org-export-use-babel (denden-site-evaluate-code site))
+           (org-confirm-babel-evaluate (not (denden-site-evaluate-code site))))
+      (delay-mode-hooks (org-mode))
+      (org-export-as 'denden-html nil nil t options))))
 
-(defun denden-topic-list-intro-html (file)
-  "Return the exported body of FILE up to, but not including, its first H2
-section."
-  (let* ((body-html (with-temp-buffer
-                      (insert-file-contents file)
-                      (org-mode)
-                      (org-export-as 'denden-html nil nil t denden-html-default-options)))
-         (split-point (string-search "<div id=\"outline-container-" body-html)))
-    (if split-point (substring body-html 0 split-point) body-html)))
+(defun denden-export-page (site page pages)
+  "Export the body of PAGE of SITE to HTML, and store it in PAGE.
+PAGES are all pages of the site, used to resolve links.  The export
+also stores the links of PAGE, for `denden-backlinks'.  Return the
+body HTML."
+  (setf (denden-page-links page) nil
+        (denden-page-external-links page) nil)
+  (let ((body (denden--export-text (denden-page-text page)
+                                   (file-name-directory (denden-page-source page))
+                                   (denden--export-options site page pages))))
+    (setf (denden-page-links page) (nreverse (denden-page-links page))
+          (denden-page-external-links page) (nreverse (denden-page-external-links page))
+          (denden-page-body page) body)))
 
-;;;; Structural page differ
-;;
-;; Compares normalised skeletons -- heading tree, link targets, image
-;; sources, landmark roles, visible text -- ignoring ids, class names and
-;; whitespace. Written for the Hugo-vs-denden parity sweep; kept as a
-;; general-purpose comparison tool, exposed via `denden-diff'.
+(defconst denden--fragment-boundary "<!-- denden fragment boundary -->"
+  "HTML comment that `denden-export-org-strings' puts between fragments.")
 
-(defun denden--normalise-whitespace (text)
-  "Return TEXT with whitespace runs collapsed to single spaces and trimmed."
-  (string-trim (replace-regexp-in-string denden-whitespace-run-regexp " " text)))
+(defun denden-export-org-strings (site texts pages &optional page)
+  "Return the HTML of each of TEXTS, pieces of Org written for SITE.
+All TEXTS are exported together, which is much faster than one export
+each, so use this for many short pieces, such as the descriptions in
+a list.  Each piece must be a paragraph or less; a heading in one
+would take in the pieces after it.  PAGES and PAGE are as in
+`denden-export-org-string'."
+  (let* ((separator (concat "\n\n#+html: " denden--fragment-boundary "\n\n"))
+         (html (denden-export-org-string site (string-join texts separator) pages page)))
+    (mapcar #'string-trim (split-string html (rx (literal denden--fragment-boundary))))))
 
-(defun denden--page-skeleton (dom)
-  "Return a normalised skeleton plist for DOM: headings, links, images,
-landmarks, and visible text."
-  (list
-   :headings (mapcar (lambda (h) (cons (dom-tag h) (denden--normalise-whitespace (dom-texts h))))
-                     (dom-search dom (lambda (el) (string-match-p (rx bos "h" (any "1-6") eos) (symbol-name (dom-tag el))))))
-   :links (mapcar (lambda (a) (dom-attr a 'href)) (dom-by-tag dom 'a))
-   :images (mapcar (lambda (img) (dom-attr img 'src)) (dom-by-tag dom 'img))
-   :landmarks (sort (mapcar (lambda (el) (symbol-name (dom-tag el)))
-                            (dom-search dom (lambda (el) (memq (dom-tag el) '(nav main header footer aside)))))
-                    #'string-lessp)
-   :text (denden--normalise-whitespace (dom-texts dom))))
+(defun denden-export-org-string (site text pages &optional page)
+  "Return the HTML of TEXT, a piece of Org written for SITE.
+PAGES are all pages of the site, used to resolve links.  When PAGE is
+given, relative links in TEXT are read from its folder.  Links in
+TEXT are not added to any page."
+  (denden--export-text text
+                       (if page
+                           (file-name-directory (denden-page-source page))
+                         (denden--site-directory site 'content))
+                       (denden--export-options site nil pages)))
 
-(defun denden--parse-html-file (file)
-  "Parse FILE's contents as HTML and return the dom.el tree."
+;;;; Pages as HTML
+
+(defun denden-date-node (time)
+  "Return a time node that shows TIME as `denden-date-format' says.
+It is marked dt-published, the published date of an h-entry."
+  `(time (:class "dt-published" :datetime ,(format-time-string "%F" time))
+         ,(format-time-string denden-date-format time)))
+
+(defun denden-section-index-p (page)
+  "Return non-nil when PAGE is the index page of its section, such as log/."
+  (let ((section (denden-page-section page)))
+    (and (not (string-empty-p section))
+         (equal (denden-page-url page) (concat section "/")))))
+
+(defun denden-term-url (taxonomy term)
+  "Return the URL of the page of TERM in TAXONOMY, such as \"tags/emacs/\"."
+  (concat (denden--slugify-path taxonomy) "/" (denden--slugify-path term) "/"))
+
+(defun denden-render-terms (site page)
+  "Return the terms of PAGE in the taxonomies of SITE, as category links.
+Each term links to its page when SITE has `denden-term-outputs';
+otherwise the terms are plain text.  The result is nil when PAGE has
+no terms."
+  (let* ((linked (memq #'denden-term-outputs (denden-site-outputs site)))
+         (terms (mapcan (lambda (taxonomy)
+                          (mapcar (lambda (term)
+                                    (if linked
+                                        `(a (:class "p-category"
+                                                    :href ,(concat "/" (denden-term-url taxonomy term)))
+                                            ,(concat "#" term))
+                                      `(span (:class "p-category") ,(concat "#" term))))
+                                  (denden-page-taxonomy-terms page taxonomy)))
+                        (denden-site-taxonomies site))))
+    (and terms `(p (:class "terms") ,@(cdr (mapcan (lambda (term) (list " " term)) terms))))))
+
+(defun denden-render-page-list (pages)
+  "Return a list of PAGES, newest first, each with its date and title.
+It is marked up as an h-feed of h-entries (see microformats.org)."
+  `(ul (:class "h-feed")
+       ,@(mapcar (lambda (page)
+                   `(li (:class "h-entry")
+                        ,(and (denden-page-date page)
+                              (denden-date-node (denden-page-date page)))
+                        " "
+                        (a (:class "u-url p-name"
+                                   :href ,(concat "/" (denden-page-url page)))
+                           ,(denden-page-title page))))
+                 (denden-sort-pages-by-date pages))))
+
+(defun denden-render-plain-page (site page pages)
+  "Return the main part of PAGE of SITE: title, subtitle, date, terms, body.
+This is the default layout of a site.  It is marked up as an h-entry
+\(see microformats.org), so feed readers and IndieWeb tools can read
+it.  On the index page of a section, such as log/ from
+log/_index.org, the body is followed by the list of the section's
+other pages from PAGES."
+  (let ((date (denden-page-date page)))
+    `(article (:class "h-entry")
+              (h1 (:class "p-name") ,(denden-page-title page))
+              ,(let ((subtitle (plist-get (denden-page-meta page) :subtitle)))
+                 (and subtitle `(p (:class "subtitle") ,subtitle)))
+              ,(and date `(p nil ,(denden-date-node date)))
+              ,(denden-render-terms site page)
+              (div (:class "e-content")
+                   (raw-html nil ,(or (denden-page-body page) "")))
+              ,(and (denden-section-index-p page)
+                    (denden-render-page-list
+                     (remove page (denden-pages-in-section
+                                   pages (denden-page-section page))))))))
+
+(defun denden--meta-description (page)
+  "Return the excerpt of PAGE on one line, at most 160 characters, or nil.
+Search engines show about that much."
+  (let ((excerpt (denden-page-excerpt page)))
+    (and excerpt
+         (let ((text (string-trim
+                      (replace-regexp-in-string (rx (+ (in " \t\n\r"))) " " excerpt))))
+           (if (> (length text) 160) (concat (substring text 0 159) "…") text)))))
+
+(defun denden-seo-head-nodes (site page &optional image-url)
+  "Return the head nodes that describe PAGE of SITE to search engines.
+They are the meta description (the excerpt, at most 160
+characters) and author, the canonical address, Open Graph and
+Twitter tags, and for a dated page a JSON-LD BlogPosting.
+IMAGE-URL, when given, is the full address of the page's preview
+image."
+  (let* ((url (denden-page-permalink site page))
+         (title (denden-page-title page))
+         (description (denden--meta-description page))
+         (date (denden-page-date page))
+         (published (and date (format-time-string "%F" date)))
+         (modified (and (denden-page-lastmod page)
+                        (format-time-string "%F" (denden-page-lastmod page))))
+         (tags (denden-page-taxonomy-terms page "tags"))
+         (author (denden-page-author site page)))
+    (append
+     (and description `((meta (:name "description" :content ,description))))
+     (and (not (string-empty-p author)) `((meta (:name "author" :content ,author))))
+     `((link (:rel "canonical" :href ,url))
+       (meta (:property "og:title" :content ,title))
+       (meta (:property "og:type" :content ,(if date "article" "website")))
+       (meta (:property "og:url" :content ,url))
+       (meta (:property "og:site_name" :content ,(denden-site-title site)))
+       (meta (:property "og:locale" :content ,(denden-site-language site))))
+     (and description `((meta (:property "og:description" :content ,description))))
+     (and published `((meta (:property "article:published_time" :content ,published))))
+     (and published modified
+          `((meta (:property "article:modified_time" :content ,modified))))
+     (and published
+          (mapcar (lambda (tag) `(meta (:property "article:tag" :content ,tag))) tags))
+     (and image-url
+          `((meta (:property "og:image" :content ,image-url))
+            (meta (:property "og:image:alt" :content ,title))
+            (meta (:name "twitter:image" :content ,image-url))))
+     `((meta (:name "twitter:card"
+                    :content ,(if image-url "summary_large_image" "summary"))))
+     (and published
+          `((script (:type "application/ld+json")
+                    (raw-html
+                     nil
+                     ,(json-serialize
+                       `((@context . "https://schema.org")
+                         (@type . "BlogPosting")
+                         (headline . ,title)
+                         (datePublished . ,published)
+                         ,@(and modified `((dateModified . ,modified)))
+                         ,@(and description `((description . ,description)))
+                         ,@(and (not (string-empty-p author))
+                                `((author . ((@type . "Person") (name . ,author)))
+                                  (publisher . ((@type . "Person") (name . ,author)))))
+                         (mainEntityOfPage . ((@type . "WebPage") (@id . ,url)))
+                         (url . ,url)
+                         ,@(and image-url `((image . [,image-url])))
+                         ,@(and tags `((keywords . ,(string-join tags ", ")))))))))))))
+
+(defun denden-default-page-shell (site page main _pages)
+  "Return the whole page node of PAGE of SITE around MAIN, its main part.
+The head has the character set, the viewport, the title,
+`denden-seo-head-nodes', the site's style sheets and, when the site
+has a feed, its link.  The header links home and shows the site's
+menu.  The footer names the author as an h-card and links the feed.
+The markup is plain and semantic, so a classless style sheet styles
+it well.  _PAGES is not used here; a site's own shell may use it."
+  `(html (:lang ,(denden-page-language site page))
+         (head nil
+               (meta (:charset "utf-8"))
+               (meta (:name "viewport" :content "width=device-width, initial-scale=1"))
+               (title nil ,(if (string-empty-p (denden-page-url page))
+                               (denden-site-title site)
+                             (format denden-page-title-format
+                                     (denden-page-title page) (denden-site-title site))))
+               ,@(denden-seo-head-nodes site page)
+               ,(and (memq #'denden-feed-output (denden-site-outputs site))
+                     `(link (:rel "alternate" :type "application/atom+xml"
+                                  :title ,(denden-site-title site)
+                                  :href ,(concat "/" denden-feed-url))))
+               ,@(mapcar (lambda (url) `(link (:rel "stylesheet" :href ,url)))
+                         (denden-site-stylesheets site)))
+         (body nil
+               (header nil
+                       (a (:href "/") ,(denden-site-title site))
+                       ,(and (denden-site-menu site)
+                             `(nav nil ,@(mapcar (lambda (item)
+                                                   `(a (:href ,(cdr item)) ,(car item)))
+                                                 (denden-site-menu site)))))
+               (main nil ,main)
+               (footer nil
+                       ,(and (not (string-empty-p (denden-site-author site)))
+                             `(p (:class "h-card")
+                                 (a (:class "p-name u-url" :href "/")
+                                    ,(denden-site-author site))))
+                       ,(and (memq #'denden-feed-output (denden-site-outputs site))
+                             `(p nil (a (:href ,(concat "/" denden-feed-url)) "Feed")))))))
+
+(defun denden-render-page (site page pages)
+  "Return the full HTML of PAGE of SITE, given all PAGES.
+The page's layout, or the site's default layout, gives the main
+part; the site's page shell wraps it.  Export the page body with
+`denden-export-page' first."
+  (let* ((layout (or (cdr (assoc (denden-page-layout page) (denden-site-layouts site)))
+                     (denden-site-default-layout site)))
+         (main (funcall layout site page pages)))
+    (concat "<!doctype html>\n"
+            (denden-serialize-node
+             (funcall (denden-site-page-shell site) site page main pages)))))
+
+(defun denden-render-site (site pages)
+  "Return every file of SITE except static files, as a list of (URL . TEXT).
+PAGES are the collected pages.  Every body is exported first, so
+backlinks are complete when the pages are rendered.  Then each page
+is rendered, and each function in the site's outputs adds its files.
+A page's URL ends in a slash, such as \"log/x/\"; it is written as
+log/x/index.html.  Two files with the same URL stop the build."
+  (dolist (page pages)
+    (denden-export-page site page pages))
+  (let ((files (append
+                (mapcar (lambda (page)
+                          (cons (denden-page-url page)
+                                (denden-render-page site page pages)))
+                        pages)
+                (mapcan (lambda (output) (funcall output site pages))
+                        (denden-site-outputs site)))))
+    (let ((seen (make-hash-table :test #'equal)))
+      (dolist (file files files)
+        (when (gethash (car file) seen)
+          (error "Denden: two files have the same URL %S" (car file)))
+        (puthash (car file) t seen)))))
+
+;;;; Outputs
+
+;; Outputs are the files a site has besides its pages: feeds, the
+;; sitemap, robots.txt, redirects and a search index.  Each function
+;; ending in -output or -outputs takes the site and its pages and returns
+;; a list of (URL . TEXT); list the ones a site wants in its :outputs.
+;; The functions they use, such as `denden-atom-feed', return text, so a
+;; site can build its own outputs from them.
+
+(defun denden--parse-html (html)
+  "Return the DOM of the HTML text, as `libxml-parse-html-region' gives it."
   (with-temp-buffer
-    (insert-file-contents file)
+    (insert html)
     (libxml-parse-html-region (point-min) (point-max))))
 
-(defun denden-diff-pages (old-file new-file)
-  "Compare OLD-FILE and NEW-FILE's normalised skeletons. Return nil if they
-match, else the differing fields."
-  (let ((old (denden--page-skeleton (denden--parse-html-file old-file)))
-        (new (denden--page-skeleton (denden--parse-html-file new-file)))
-        (diffs nil))
-    (dolist (field '(:headings :links :images :landmarks :text))
-      (let ((old-value (plist-get old field))
-            (new-value (plist-get new field)))
-        (unless (equal old-value new-value)
-          (push (list field old-value new-value) diffs))))
-    (nreverse diffs)))
+(defun denden--dom-text (node)
+  "Return the text of the DOM NODE, with runs of white space made one space."
+  (string-trim (replace-regexp-in-string (rx (+ (in " \t\n\r"))) " "
+                                         (string-join (dom-strings node)))))
 
-;;;; Accessibility/structure/perf-budget linter
-;;
-;; Permanent accessibility gate, unlike the differ above: exactly one h1,
-;; every img has alt, no empty href, heading levels never skip, every
-;; internal link resolves to a known output file, page weight within
-;; budget.
+(defun denden-html-plain-text (html)
+  "Return the text of HTML, without tags and with spaces joined.
+Heading anchors (see `denden-heading-anchor-text') are left out."
+  (let ((dom (denden--parse-html html)))
+    (dolist (anchor (dom-by-class dom (rx bos "heading-anchor" eos)))
+      (dom-remove-node dom anchor))
+    (denden--dom-text dom)))
 
-(defconst denden-page-weight-budget-bytes 100000
-  "Maximum byte size allowed for one rendered HTML page.")
+(defun denden--prose-paragraphs (node)
+  "Return the p elements under NODE in order, leaving out figures and callouts.
+A figure holds an image and its caption, and a callout a label and
+a note, which are not the prose of the page."
+  (cond
+   ((not (consp node)) nil)
+   ((eq (dom-tag node) 'figure) nil)
+   ((equal (dom-attr node 'class) "callout") nil)
+   ((eq (dom-tag node) 'p) (list node))
+   (t (mapcan #'denden--prose-paragraphs (dom-children node)))))
 
-(defun denden--heading-level (element)
-  "Return ELEMENT's heading level, 1 to 6, if it is h1 through h6, else nil."
-  (and (consp element)
-       (let ((name (symbol-name (dom-tag element))))
-         (when (string-match (rx bos "h" (group (any "1-6")) eos) name)
-           (string-to-number (match-string 1 name))))))
+(defun denden-page-excerpt (page)
+  "Return a short description of PAGE as plain text.
+It is the page's #+description:, or else its first paragraphs (see
+`denden-excerpt-paragraphs'), separated by a blank line.  Export the
+page first; a page with no body and no description gives nil."
+  (or (denden-page-description page)
+      (let ((body (denden-page-body page)))
+        (and body
+             (let* ((paragraphs (seq-take (denden--prose-paragraphs
+                                           (denden--parse-html body))
+                                          denden-excerpt-paragraphs))
+                    (text (mapconcat #'denden--dom-text paragraphs "\n\n")))
+               (and (not (string-empty-p text)) text))))))
 
-(defun denden-lint-html-string (html &optional known-output-paths)
-  "Return a list of problem strings found in HTML, a full page source. Checks
-internal links against KNOWN-OUTPUT-PATHS if given."
-  (let* ((dom (with-temp-buffer (insert html) (libxml-parse-html-region (point-min) (point-max))))
-         (problems nil))
-    (let ((byte-size (string-bytes html)))
-      (when (> byte-size denden-page-weight-budget-bytes)
-        (push (format "page weight %d bytes exceeds budget of %d" byte-size denden-page-weight-budget-bytes)
-              problems)))
-    (unless (cl-find-if (lambda (m) (dom-attr m 'charset)) (dom-by-tag dom 'meta))
-      (push "no <meta charset> in head -- a browser with no other encoding signal will misdecode every nerd-font glyph" problems))
-    (let ((h1-count (length (dom-by-tag dom 'h1))))
-      (unless (= h1-count 1)
-        (push (format "expected exactly one h1, found %d" h1-count) problems)))
-    (dolist (img (dom-by-tag dom 'img))
-      (unless (dom-attr img 'alt)
-        (push (format "img with no alt: %s" (or (dom-attr img 'src) "(no src)")) problems)))
-    (dolist (a (dom-by-tag dom 'a))
-      (let ((href (dom-attr a 'href)))
-        (when (and href (string-empty-p href))
-          (push "a with empty href" problems))))
-    (let ((previous-level nil))
-      (dolist (heading (dom-search dom #'denden--heading-level))
-        (let ((level (denden--heading-level heading)))
-          (when (and previous-level (> level (1+ previous-level)))
-            (push (format "heading level skips from h%d to h%d" previous-level level) problems))
-          (setq previous-level level))))
-    (when known-output-paths
-      (dolist (a (dom-by-tag dom 'a))
-        (let ((href (dom-attr a 'href)))
-          (when (and href (string-prefix-p "/" href)
-                     (not (member href known-output-paths)))
-            (push (format "internal link does not resolve: %s" href) problems)))))
-    (nreverse problems)))
+(defun denden--feed-time (time)
+  "Return TIME as an Atom date, midnight UTC of its day.
+Denden's dates are days, so the time of day is always midnight."
+  (format-time-string "%FT00:00:00Z" time))
 
-(defun denden-lint-file (file &optional known-output-paths)
-  "Return `denden-lint-html-string' problems for FILE's contents."
-  (denden-lint-html-string
-   (with-temp-buffer (insert-file-contents file) (buffer-string))
-   known-output-paths))
+(defun denden--atom-entry (site page)
+  "Return the Atom entry node of PAGE of SITE.
+A page with its own #+author: names that author in its entry."
+  (let ((url (denden-page-permalink site page)))
+    `(entry nil
+            (title nil ,(denden-page-title page))
+            (link (:rel "alternate" :type "text/html" :href ,url))
+            (id nil ,url)
+            ,(and (denden-page-date page)
+                  `(published nil ,(denden--feed-time (denden-page-date page))))
+            (updated nil ,(denden--feed-time (or (denden-page-lastmod page)
+                                                 (denden-page-date page))))
+            ,(let ((author (plist-get (denden-page-meta page) :author)))
+               (and author `(author nil (name nil ,author))))
+            ,@(mapcar (lambda (tag)
+                        `(category (:term ,(downcase tag) :label ,tag
+                                          :scheme ,(concat (denden-base-url site) "tags/"))))
+                      (denden-page-taxonomy-terms page "tags"))
+            ,(let ((summary (denden-page-excerpt page)))
+               (and summary `(summary nil ,summary)))
+            (content (:type "html") ,(or (denden-page-body page) "")))))
 
-;;;; Atom feeds, sitemap, robots.txt, alias redirects
+(cl-defun denden-atom-feed (site pages &key title url self-url icon rights)
+  "Return an Atom feed of SITE with an entry for each of PAGES.
+PAGES are written in the order given; sort them first, for example
+with `denden-sort-pages-by-date'.  The keys are optional: TITLE
+\(the site title by default), URL (the page the feed belongs to, the
+site's address by default), SELF-URL (the feed's own address), ICON
+\(the address of an icon) and RIGHTS (a copyright line)."
+  (let ((url (or url (denden-base-url site))))
+    (concat
+     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+     (denden-serialize-node
+      `(feed (:xmlns "http://www.w3.org/2005/Atom")
+             (title nil ,(or title (denden-site-title site)))
+             ,(and (not (string-empty-p (denden-site-description site)))
+                   `(subtitle nil ,(denden-site-description site)))
+             (link (:rel "alternate" :type "text/html" :href ,url))
+             ,(and self-url
+                   `(link (:rel "self" :type "application/atom+xml" :href ,self-url)))
+             (id nil ,(or self-url url))
+             ,(and pages
+                   `(updated nil ,(denden--feed-time
+                                   (car (sort (mapcar (lambda (page)
+                                                        (or (denden-page-lastmod page)
+                                                            (denden-page-date page) 0))
+                                                      pages)
+                                              :lessp #'time-less-p :reverse t)))))
+             ,(and (not (string-empty-p (denden-site-author site)))
+                   `(author nil (name nil ,(denden-site-author site))))
+             (generator nil "Denden")
+             ,(and icon `(icon nil ,icon))
+             ,(and rights `(rights nil ,rights))
+             ,@(mapcar (lambda (page) (denden--atom-entry site page)) pages)))
+     "\n")))
 
-(defun denden--atom-datetime (date)
-  "Return DATE (\"YYYY-MM-DD\") as an Atom/RFC3339 datetime, midnight UTC."
-  (format "%sT00:00:00Z" date))
+(defun denden-feed-output (site pages)
+  "Return the site feed of SITE as one (URL . TEXT), in a list.
+The feed has the dated pages of PAGES, newest first, at most the
+site's feed entry count."
+  (let* ((dated (denden-sort-pages-by-date (seq-filter #'denden-page-date pages)))
+         (count (denden-site-feed-entry-count site)))
+    (list (cons denden-feed-url
+                (denden-atom-feed site (if count (seq-take dated count) dated)
+                                  :self-url (concat (denden-base-url site)
+                                                    denden-feed-url))))))
 
-(defun denden--atom-entry-node (page base-url)
-  "Return one <entry> node for PAGE, with BASE-URL for each category's
-\"tags/\" scheme URI."
-  (append
-   (list 'entry nil
-         (list 'title nil (plist-get page :title))
-         (list 'link (list :rel "alternate" :type "text/html" :href (plist-get page :permalink)))
-         (list 'id nil (plist-get page :permalink)))
-   (when (plist-get page :date)
-     (list (list 'published nil (denden--atom-datetime (plist-get page :date)))))
-   (list (list 'updated nil (denden--atom-datetime (plist-get page :lastmod))))
-   (mapcar (lambda (tag)
-             (list 'category (list :term (downcase tag) :label tag :scheme (format "%stags/" base-url))))
-           (plist-get page :tags))
-   (list (list 'content '(:type "html")
-               (list 'raw-html nil (format "<![CDATA[%s]]>" (plist-get page :content-html)))))))
+(defun denden-term-outputs (site pages)
+  "Return the pages of the taxonomies of SITE, as (URL . TEXT).
+For each taxonomy with terms in PAGES, such as tags, there is a page
+that lists its terms with their counts, at tags/, and a page per
+term that lists its pages, newest first, at tags/emacs/.  They go
+through the site's page shell and default layout, like other pages."
+  (let ((generated nil))
+    (dolist (taxonomy (denden-site-taxonomies site))
+      (let ((counts (denden-term-counts pages taxonomy)))
+        (when counts
+          (push (denden-page-create
+                 :url (concat (denden--slugify-path taxonomy) "/")
+                 :title (capitalize taxonomy)
+                 :body (denden-serialize-node
+                        `(ul (:class "terms")
+                             ,@(mapcar (lambda (entry)
+                                         `(li nil
+                                              (a (:href ,(concat "/" (denden-term-url taxonomy (car entry))))
+                                                 ,(concat "#" (car entry)))
+                                              ,(format " (%d)" (cdr entry))))
+                                       (sort counts :key #'car)))))
+                generated)
+          (pcase-dolist (`(,term . ,_count) counts)
+            (push (denden-page-create
+                   :url (denden-term-url taxonomy term)
+                   :title (concat "#" term)
+                   :body (denden-serialize-node
+                          (denden-render-page-list (denden-pages-with-term pages taxonomy term))))
+                  generated)))))
+    (mapcar (lambda (page) (cons (denden-page-url page) (denden-render-page site page pages)))
+            (nreverse generated))))
 
-(cl-defun denden-atom-feed (&key pages site-title description base-url self-url
-                                 author-name author-email favicon-url copyright)
-  "Return an Atom feed string over PAGES, titled SITE-TITLE, rooted at
-BASE-URL. SELF-URL is always the rss.xml permalink."
-  (concat
-   "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-   (denden-serialize-node
-    (denden-normalise-node
-     (append
-      (list 'feed '(:xmlns "http://www.w3.org/2005/Atom")
-            (list 'title nil site-title)
-            (list 'subtitle nil (or description ""))
-            (list 'link (list :rel "alternate" :type "text/html" :href base-url))
-            (list 'link (list :rel "self" :type "application/atom+xml" :href self-url))
-            (list 'id nil base-url))
-      (when pages
-        (list (list 'updated nil (denden--atom-datetime (plist-get (car pages) :lastmod)))))
-      (when author-name
-        (list (append (list 'author nil (list 'name nil author-name))
-                      (when author-email (list (list 'email nil author-email))))))
-      (list (list 'generator '(:uri "https://gohugo.io/") "Hugo"))
-      (when favicon-url (list (list 'icon nil favicon-url)))
-      (when copyright (list (list 'rights nil copyright)))
-      (mapcar (lambda (page) (denden--atom-entry-node page base-url)) pages))))
-   "\n"))
-
-(defun denden-sitemap-xml (pages)
-  "Return the sitemap.xml body: one <url> per page, with <loc> and <lastmod>
-when known."
+(defun denden-sitemap-xml (site pages)
+  "Return a sitemap of PAGES of SITE, for search engines."
   (concat
    "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n"
    (denden-serialize-node
-    (denden-normalise-node
-     (append
-      (list 'urlset '(:xmlns "http://www.sitemaps.org/schemas/sitemap/0.9"))
-      (mapcar (lambda (page)
-                (append (list 'url nil (list 'loc nil (plist-get page :permalink)))
-                        (when (plist-get page :lastmod)
-                          (list (list 'lastmod nil (denden--atom-datetime (plist-get page :lastmod)))))))
-              pages))))
+    `(urlset (:xmlns "http://www.sitemaps.org/schemas/sitemap/0.9")
+             ,@(mapcar (lambda (page)
+                         `(url nil
+                               (loc nil ,(denden-page-permalink site page))
+                               ,(and (denden-page-lastmod page)
+                                     `(lastmod nil ,(denden--feed-time
+                                                     (denden-page-lastmod page))))))
+                       pages)))
    "\n"))
 
-(defun denden-robots-txt (base-url)
-  "Return robots.txt text: allow everything, and point at the sitemap under
-BASE-URL."
-  (format "User-agent: *\nAllow: /\n\nSitemap: %ssitemap.xml\n"
-          (file-name-as-directory base-url)))
+(defun denden-sitemap-output (site pages)
+  "Return the sitemap of SITE for PAGES as one (URL . TEXT), in a list."
+  (list (cons "sitemap.xml" (denden-sitemap-xml site pages))))
 
-(defun denden-alias-redirect-html (target-permalink)
-  "Return a noindex redirect page to TARGET-PERMALINK, refreshing to its path only."
-  ;; The canonical link stays absolute for search engines; the refresh is
-  ;; root-relative, so a local server keeps the visitor on localhost.
-  (let ((path (or (url-filename (url-generic-parse-url target-permalink)) "/")))
+(defun denden-robots-txt (site)
+  "Return a robots.txt for SITE that allows everything and names the sitemap."
+  (format "User-agent: *\nAllow: /\n\nSitemap: %ssitemap.xml\n" (denden-base-url site)))
+
+(defun denden-robots-output (site _pages)
+  "Return the robots.txt of SITE as one (URL . TEXT), in a list.
+_PAGES is not used."
+  (list (cons "robots.txt" (denden-robots-txt site))))
+
+(defun denden-redirect-html (site page)
+  "Return a page that sends the reader on to PAGE of SITE.
+Search engines are told the real address and not to index this one.
+The page also has a plain link, for readers whose browser does not
+follow the redirect."
+  (let ((url (denden-page-permalink site page))
+        (path (concat "/" (denden-page-url page))))
     (concat
-     "<!doctype html>"
+     "<!doctype html>\n"
      (denden-serialize-node
-      (denden-normalise-node
-       (list 'html nil
-             (list 'head nil
-                   (list 'title nil target-permalink)
-                   (list 'link (list :rel "canonical" :href target-permalink))
-                   '(meta (:name "robots" :content "noindex"))
-                   '(meta (:charset "utf-8"))
-                   (list 'meta (list :http-equiv "refresh"
-                                     :content (format "0; url=%s" (if (string-empty-p path) "/" path)))))))))))
+      `(html (:lang ,(denden-site-language site))
+             (head nil
+                   (meta (:charset "utf-8"))
+                   (title nil ,(denden-page-title page))
+                   (link (:rel "canonical" :href ,url))
+                   (meta (:name "robots" :content "noindex"))
+                   (meta (:http-equiv "refresh" :content ,(concat "0; url=" path))))
+             (body nil
+                   (p nil (a (:href ,path) ,(denden-page-title page)))))))))
 
-;;;; search-index.json generation
-;;
-;; One entry per sentence across all pages, orderless multi-word match at
-;; query time, the sentence itself is what gets Text-Fragment highlighted
-;; on click.
+(defun denden-redirect-outputs (site pages)
+  "Return a redirect page of SITE for each alias of PAGES, as (URL . TEXT).
+An alias such as \"posts/first\" is written as posts/first/index.html."
+  (mapcan (lambda (page)
+            (mapcar (lambda (alias)
+                      (cons (file-name-as-directory (string-trim alias "/" "/"))
+                            (denden-redirect-html site page)))
+                    (denden-page-aliases page)))
+          pages))
 
-(defun denden-html-plain-text (html)
-  "Return HTML with tags stripped, entities decoded, and whitespace
-collapsed, via a real HTML parse. Heading # links are dropped."
-  (denden--normalise-whitespace
-   (dom-inner-text (with-temp-buffer
-                     (insert (replace-regexp-in-string
-                              (rx "<a class=\"heading-anchor\"" (* (not (any ">"))) ">#</a>") "" html))
-                     (libxml-parse-html-region (point-min) (point-max))))))
-
-(defun denden--search-index-sentences (plain-text)
-  "Split PLAIN-TEXT into sentences on \".\", \"!\", or \"?\", dropping any 3
-characters or shorter."
-  (seq-filter (lambda (s) (> (length s) 3))
-              (mapcar #'string-trim
-                      (split-string (replace-regexp-in-string
-                                     (rx (group (any ".!?")) (+ (any " \t\n"))) "\\1\1" plain-text)
-                                    "\1"))))
+(defun denden--sentences (text)
+  "Return the sentences of TEXT, each ending in its . ! or ?.
+Sentences of three characters or fewer are left out."
+  (let ((sentences nil)
+        (start 0))
+    (while (string-match (rx (in ".!?") (+ (in " \t\n"))) text start)
+      (push (substring text start (1+ (match-beginning 0))) sentences)
+      (setq start (match-end 0)))
+    (push (substring text start) sentences)
+    (seq-filter (lambda (sentence) (> (length sentence) 3))
+                (mapcar #'string-trim (nreverse sentences)))))
 
 (defun denden-search-index-json (pages)
-  "Return the search-index.json payload: one {title url text} entry per
-sentence across PAGES."
+  "Return a search index of PAGES as JSON text.
+It is an array with one object per sentence: its page title, the
+page URL from the site root, and the sentence."
   (json-serialize
    (vconcat
-    (seq-mapcat
-     (lambda (page)
-       (mapcar (lambda (sentence)
-                 (list :title (plist-get page :title) :url (plist-get page :url) :text sentence))
-               (denden--search-index-sentences (plist-get page :plain-text))))
-     pages))))
+    (mapcan (lambda (page)
+              (mapcar (lambda (sentence)
+                        `((title . ,(denden-page-title page))
+                          (url . ,(concat "/" (denden-page-url page)))
+                          (text . ,sentence)))
+                      (denden--sentences
+                       (denden-html-plain-text (or (denden-page-body page) "")))))
+            pages))))
 
-;;;; OG card mechanism: text-wrapping primitives
-;;
-;; What's generic and reusable across any such card -- greedy word-wrapping
-;; to a character width, and truncating a wrapped block to a line limit
-;; with an ellipsis -- lives here; a site's actual card markup/colors is
-;; its own template.
+(defun denden-search-index-output (_site pages)
+  "Return the search index of PAGES as one (URL . TEXT), in a list.
+_SITE is not used."
+  (list (cons "search-index.json" (denden-search-index-json pages))))
 
-(defun denden-og-wrap-words (text max-width)
-  "Return TEXT greedily word-wrapped to MAX-WIDTH characters per line."
-  (let (lines (current ""))
-    (dolist (word (split-string text " " t))
-      (let ((candidate (if (string-empty-p current) word (concat current " " word))))
-        (if (> (length candidate) max-width)
-            (progn (when (not (string-empty-p current)) (push current lines))
-                   (setq current word))
-          (setq current candidate))))
-    (unless (string-empty-p current) (push current lines))
-    (nreverse lines)))
+;;;; Build
 
-(defun denden-og-truncate-lines (lines max-lines)
-  "Return LINES capped to MAX-LINES, with an ellipsis on the last line if
-content was cut."
-  (if (<= (length lines) max-lines)
-      lines
-    (let ((kept (seq-take lines max-lines)))
-      (append (seq-take kept (1- max-lines))
-              (list (concat (car (last kept)) "…"))))))
+;; A build is always full and clean.  It writes the whole site into a new
+;; folder next to the publishing folder, and only when every file is
+;; written does it replace the old site.  A failed build leaves the old
+;; site as it was.
 
-;;;; Interactive dev-session helpers
-;;
-;; Not part of the build itself. `require' is a no-op once a feature is
-;; already provided, so editing this file and re-requiring it in a
-;; long-running Emacs session does NOT pick up the change; `denden-reload-
-;; all' reloads denden/site/theme fresh from disk instead.
+(defun denden--url-file (url)
+  "Return the file name, relative to the site, that URL is written to.
+A URL that ends in a slash, or is empty, names a folder, so its
+file is index.html in that folder."
+  (if (or (string-empty-p url) (string-suffix-p "/" url))
+      (concat url "index.html")
+    url))
 
-;;;###autoload
-(defun denden-reload-all ()
-  "Reload denden.el, site.el and theme.el fresh from disk, without restarting
-Emacs."
-  (interactive)
-  (dolist (dir '("denden" "site" "theme"))
-    (let ((full-dir (expand-file-name dir denden-repository-directory)))
-      (add-to-list 'load-path full-dir)
-      (dolist (file (directory-files full-dir t (rx ".el" eos)))
-        (load file nil t)))))
+(defun denden--check-publishing-directory (site directory)
+  "Signal an error unless DIRECTORY is safe for SITE to replace.
+A build deletes the old publishing folder, so it must not be the
+site's root folder, hold the content or static folder, or sit inside
+one of them."
+  (dolist (field '(content static))
+    (let ((protected (file-name-as-directory (denden--site-directory site field)))
+          (publishing (file-name-as-directory directory)))
+      (when (or (string-prefix-p publishing protected)
+                (string-prefix-p protected publishing))
+        (error "Denden: the publishing folder %s overlaps the %s folder %s"
+               directory field protected))))
+  (when (file-equal-p directory (denden-site-root-directory site))
+    (error "Denden: the publishing folder %s is the site's root folder" directory)))
 
-;; Dev-only live reload: `denden-build-dev' rebuilds via `denden-build-
-;; function' (the site layer's own async build entry point), and only
-;; once it signals done -- proving the child process
-;; has actually finished writing, not merely started -- appends a small
-;; poll-and-reload script to every output page and refreshes a marker file
-;; that script polls. A plain static file server is enough on the serving
-;; side; nothing server-side has to push anything.
+(defun denden--written-urls (directory)
+  "Return a hash table of every URL a reader can open in DIRECTORY.
+Each file counts by its own name, and a folder's index.html also
+counts as the folder, with and without the final slash."
+  (let ((urls (make-hash-table :test #'equal)))
+    (dolist (file (directory-files-recursively directory ""))
+      (let ((relative (file-relative-name file directory)))
+        (puthash relative t urls)
+        (when (equal (file-name-nondirectory relative) "index.html")
+          (let ((folder (string-remove-suffix "index.html" relative)))
+            (puthash folder t urls)
+            (puthash (string-remove-suffix "/" folder) t urls)))))
+    urls))
 
-(defcustom denden-build-function nil
-  "Function of (FORCE ON-DONE) that performs an async build with live reload.
-Called by `denden-build-dev'/`denden-watch-start'. Must be set by the
-site layer, e.g. to a function like `site-build-async'."
-  :type 'function :group 'denden)
+(defun denden--check-links (pages directory)
+  "Check that every internal link of PAGES names a file in DIRECTORY.
+Each link to nothing is reported as `denden-broken-link-action' says:
+a message, or one error that lists them all."
+  (let ((urls (denden--written-urls directory))
+        (problems nil))
+    (dolist (page pages)
+      (dolist (link (denden-page-links page))
+        (let ((url (car (split-string link (rx (in "#?"))))))
+          (unless (gethash url urls)
+            (push (format "%s links to %s, which the build did not write"
+                          (denden-page-source page) link)
+                  problems)))))
+    (setq problems (nreverse problems))
+    (when problems
+      (if (eq denden-broken-link-action 'error)
+          (error "Denden: broken links:\n%s" (string-join problems "\n"))
+        (dolist (problem problems)
+          (message "Denden: %s" problem))))))
 
-(defcustom denden-full-build-function nil
-  "Function of one argument FORCE that performs a complete synchronous build.
-Runs org-publish plus every site-specific auxiliary output. Set by the
-site layer, e.g. to a function like `site-build'."
-  :type 'function :group 'denden)
+(defun denden--write-site (site files directory)
+  "Write the static folder of SITE, then FILES, into DIRECTORY.
+FILES is a list of (URL . TEXT).  DIRECTORY must not exist yet.  A
+file of FILES may replace a static file of the same name, such as a
+site's own version of a file that came with a theme; the build says
+so in a message."
+  (let ((static (denden--site-directory site 'static)))
+    (make-directory directory t)
+    (when (file-directory-p static)
+      (copy-directory static (file-name-as-directory directory) nil t t))
+    (pcase-dolist (`(,url . ,text) files)
+      (let ((file (expand-file-name (denden--url-file url) directory)))
+        (when (file-exists-p file)
+          (message "Denden: %s replaces the static file of the same name" url))
+        (make-directory (file-name-directory file) t)
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region text nil file nil 'silent))))))
 
-(defcustom denden-content-directory nil
-  "Directory `denden-list-drafts' scans, and every content file lives under.
-Set by the site layer."
-  :type 'directory :group 'denden)
-
-(defcustom denden-post-directory nil
-  "Directory `denden-new' creates a new post file under.
-Set by the site layer, typically a \"posts\" subdirectory of
-`denden-content-directory'."
-  :type 'directory :group 'denden)
-
-(defcustom denden-publishing-directory nil
-  "Directory a build writes its output to. Set by the site layer."
-  :type 'directory :group 'denden)
-
-(defcustom denden-project-root-directory nil
-  "Project root `denden-find'/`denden-site' operate on.
-Set by the site layer."
-  :type 'directory :group 'denden)
-
-(defcustom denden-preview-base-url "http://localhost:7777"
-  "Base URL `denden-preview-command''s server answers on."
-  :type 'string :group 'denden)
-
-(defun denden--preview-port ()
-  "The port number in `denden-preview-base-url', or \"7777\" if it has none."
-  (if (string-match (rx ":" (group (+ digit)) eos) denden-preview-base-url)
-      (match-string 1 denden-preview-base-url)
-    "7777"))
-
-(defun denden--default-preview-command ()
-  "Return the default `denden-preview-command': static-web-server, Nix run, or
-Python's http.server, in that order."
-  (let ((port (denden--preview-port)))
-    (cond
-     ((executable-find "static-web-server")
-      (format "static-web-server --port %s --page404 404.html" port))
-     ((executable-find "nix")
-      (format "nix run nixpkgs#static-web-server -- --port %s --page404 404.html" port))
-     (t (format "python3 -m http.server %s" port)))))
-
-(defcustom denden-preview-command (denden--default-preview-command)
-  "Shell command `denden-build-serve' runs to preview a build.
-Runs with `denden-publishing-directory' as its working directory. See
-`denden--default-preview-command' for how this default is picked."
-  :type 'string :group 'denden)
-
-(defcustom denden-new-post-template "#+title: %s\n#+date: %s\n#+tags: %s\n#+draft: %s\n\n"
-  "Template `denden-new' formats and inserts into a new post buffer.
-Formatted with title, today's date, space-separated tags, and
-\"true\"/\"false\"."
-  :type 'string :group 'denden)
-
-(defconst denden-livereload-marker-file "denden-livereload-marker.txt"
-  "Name of the marker file the live-reload script polls, at the output root.")
-
-(defun denden--livereload-script-tag ()
-  "Return the dev-only live-reload <script> tag, which polls
-`denden-livereload-marker-file' every second."
-  (format "<script>(function(){var last=null;function poll(){fetch(%S,{cache:\"no-store\"}).then(function(r){return r.text()}).then(function(t){if(last!==null&&t!==last){location.reload()}last=t}).catch(function(){})}setInterval(poll,1000)})();</script>"
-          (concat "/" denden-livereload-marker-file)))
-
-(defun denden-write-livereload-marker (pub-dir)
-  "Write PUB-DIR's live-reload marker file with the current time."
-  (with-temp-file (expand-file-name denden-livereload-marker-file pub-dir)
-    (insert (format-time-string "%s%N"))))
-
-(defun denden-inject-livereload-file (file)
-  "Append the dev-only live-reload script to FILE, an HTML output file."
-  (with-temp-buffer
-    (insert-file-contents file)
-    (goto-char (point-max))
-    (insert (denden--livereload-script-tag))
-    (write-region (point-min) (point-max) file nil 0)))
-
-(defun denden-inject-livereload (pub-dir)
-  "Call `denden-inject-livereload-file' on every .html file under PUB-DIR."
-  (dolist (file (directory-files-recursively pub-dir (rx ".html" eos)))
-    (denden-inject-livereload-file file)))
-
-(defconst denden-preview-base-url-envvar "DENDEN_PREVIEW_BASE_URL"
-  "Environment variable a site's base-url must consult first, for local
-preview.")
-
-
-(defun denden-build-dev (&optional force on-done)
-  "Rebuild for local preview via `denden-build-function', then refresh the
-live-reload marker."
-  (interactive)
-  (unless denden-build-function
-    (error "Denden-build-function is not set -- the site layer must set it"))
-  (setenv denden-preview-base-url-envvar denden-preview-base-url)
-  (funcall denden-build-function
-           force
-           (lambda (_)
-             (denden-write-livereload-marker denden-publishing-directory)
-             (denden-inject-livereload denden-publishing-directory)
-             (message "Denden: dev rebuild complete, live-reload marker refreshed")
-             (when on-done (funcall on-done)))))
-
-(defcustom denden-build-file-function nil
-  "Function of (FILE ON-DONE) that rebuilds just FILE, one content source
-file, then calls ON-DONE. Set by the site layer, e.g. to
-`site-build-file-async'. `denden-watch--on-event' uses this fast path only
-when every changed file is a content file. Any other change falls back to
-a full rebuild."
-  :type 'function :group 'denden)
-
-(defun denden--content-org-file-p (file)
-  "Return non-nil if FILE is a *.org file under `denden-content-directory'."
-  (and denden-content-directory
-       (string-suffix-p ".org" file)
-       (file-in-directory-p file denden-content-directory)))
-
-(defun denden-build-dev-file (file &optional on-done)
-  "Rebuild just FILE via `denden-build-file-function', then refresh the
-live-reload marker."
-  (unless denden-build-file-function
-    (error "Denden-build-file-function is not set -- the site layer must set it"))
-  (setenv denden-preview-base-url-envvar denden-preview-base-url)
-  (funcall denden-build-file-function
-           file
-           (lambda (_)
-             (denden-write-livereload-marker denden-publishing-directory)
-             (denden-inject-livereload denden-publishing-directory)
-             (message "Denden: dev rebuild complete (%s), live-reload marker refreshed"
-                      (file-relative-name file denden-repository-directory))
-             (when on-done (funcall on-done)))))
-
-(defvar denden-watch--descriptors nil
-  "Active `file-notify' descriptors from `denden-watch-start'.")
-
-(defvar denden-watch--timer nil
-  "Debounce timer: a rebuild fires this long after the last change.")
-
-(defconst denden-watch-debounce-seconds 0.6
-  "Quiet period after a change before `denden-watch-start' rebuilds.")
-
-(defun denden-watch--directories ()
-  "Return content/static/denden/site/theme and every directory under them,
-including the five bases themselves."
-  (seq-filter
-   #'file-directory-p
-   (seq-mapcat
-    (lambda (dir)
-      (let ((full (expand-file-name dir denden-repository-directory)))
-        (if (file-directory-p full) (cons full (directory-files-recursively full "" t)) nil)))
-    '("content" "static" "denden" "site" "theme"))))
-
-(defvar denden-watch--pending-files nil
-  "Files touched since the last debounced rebuild fired.")
-
-(defun denden-watch--on-event (event)
-  "Record EVENT's file, then debounce: rebuild only changed content files, or
-fall back to a full rebuild."
-  (let ((file (nth 2 event)))
-    (when file (push file denden-watch--pending-files)))
-  (when denden-watch--timer (cancel-timer denden-watch--timer))
-  (setq denden-watch--timer
-        (run-at-time denden-watch-debounce-seconds nil
-                     (lambda ()
-                       (let ((files (delete-dups denden-watch--pending-files)))
-                         (setq denden-watch--pending-files nil)
-                         (denden-reload-all)
-                         (if (and denden-build-file-function files
-                                  (seq-every-p #'denden--content-org-file-p files))
-                             (progn
-                               (message "Denden: change detected, rebuilding %d file(s)..."
-                                        (length files))
-                               (dolist (file files) (denden-build-dev-file file)))
-                           (message "Denden: change detected, rebuilding...")
-                           (denden-build-dev t)))))))
+(defun denden--read-site ()
+  "Ask for one of `denden-sites' and return it.
+When only one site is defined, return it without asking."
+  (pcase denden-sites
+    ('nil (user-error "No site is defined; see `denden-define-site'"))
+    (`((,_name . ,site)) site)
+    (_ (alist-get (intern (completing-read "Build site: "
+                                           (mapcar #'car denden-sites) nil t))
+                  denden-sites))))
 
 ;;;###autoload
-(defun denden-watch-start ()
-  "Watch content/static/denden/site/theme for changes and auto-rebuild,
-debounced with live reload."
-  (interactive)
-  (denden-watch-stop)
-  (dolist (dir (cons denden-repository-directory (denden-watch--directories)))
-    (push (file-notify-add-watch dir '(change) #'denden-watch--on-event)
-          denden-watch--descriptors))
-  (message "Denden: watching for changes (%d directories)" (length denden-watch--descriptors)))
-
-;;;###autoload
-(defun denden-watch-stop ()
-  "Stop all watches started by `denden-watch-start'."
-  (interactive)
-  (dolist (descriptor denden-watch--descriptors)
-    (ignore-errors (file-notify-rm-watch descriptor)))
-  (setq denden-watch--descriptors nil)
-  (setq denden-watch--pending-files nil)
-  (when denden-watch--timer (cancel-timer denden-watch--timer) (setq denden-watch--timer nil)))
-
-(define-minor-mode denden-auto-rebuild-mode
-  "Global minor mode: while enabled, content, site, and theme changes
-auto-rebuild with live reload."
-  :global t
-  :lighter " Denden-Auto"
-  (if denden-auto-rebuild-mode (denden-watch-start) (denden-watch-stop)))
-
-;;;; Command-defining macro, for a site layer's own commands
-
-(defmacro denden-define-command (site name arglist docstring &rest body)
-  "Define an autoloaded command denden-SITE-NAME that wraps BODY with start
-and done messages."
-  (declare (indent 3) (doc-string 4))
-  (let ((full-name (intern (format "denden-%s-%s" site name))))
-    `(progn
-       ;;;###autoload
-       (defun ,full-name ,arglist
-         ,docstring
-         (interactive)
-         (message "%s..." ',full-name)
-         ,@body
-         (message "%s done" ',full-name)))))
-
-;;;; User-facing build/content commands
-
-;;;###autoload
-(defun denden-build (&optional force)
-  "Build the site via `denden-full-build-function', using the timestamp cache
-unless FORCE."
-  (interactive "P")
-  (unless denden-full-build-function
-    (error "Denden-full-build-function is not set -- the site layer must set it"))
-  (setenv denden-preview-base-url-envvar nil)
-  (funcall denden-full-build-function force)
-  (message "Denden-build: done"))
-
-;;;###autoload
-(defun denden-clean-build ()
-  "Clear the publish cache and rebuild everything from scratch."
-  (interactive)
-  (denden-build t))
-
-(defun denden--start-preview-server ()
-  "Serve `denden-publishing-directory' via `denden-preview-command', without
-building first."
-  (let ((default-directory (file-name-as-directory denden-publishing-directory)))
-    (async-shell-command denden-preview-command)))
-
-;;;###autoload
-(defun denden-build-serve ()
-  "Build the site, then serve it via `denden-preview-command'."
-  (interactive)
-  (denden-build)
-  (denden--start-preview-server))
-
-;;;###autoload
-(defun denden-clean ()
-  "Delete `denden-publishing-directory' entirely, without rebuilding."
-  (interactive)
-  (if (and denden-publishing-directory (file-directory-p denden-publishing-directory))
-      (progn (delete-directory denden-publishing-directory t)
-             (message "Denden-clean: removed %s" denden-publishing-directory))
-    (message "Denden-clean: nothing to remove")))
-
-;;;###autoload
-(defun denden-lint ()
-  "Run `denden-lint-file' over every page under `denden-publishing-directory',
-shown in *denden-lint*."
-  (interactive)
-  (let ((problems nil))
-    (dolist (file (directory-files-recursively denden-publishing-directory (rx ".html" eos)))
-      (dolist (problem (denden-lint-file file))
-        (push (format "%s: %s" (file-relative-name file denden-publishing-directory) problem) problems)))
-    (with-current-buffer (get-buffer-create "*denden-lint*")
-      (erase-buffer)
-      (insert (if problems (mapconcat #'identity (nreverse problems) "\n") "No problems found."))
-      (display-buffer (current-buffer)))))
-
-;;;###autoload
-(defun denden-list-drafts ()
-  "List every draft post file under `denden-content-directory'."
-  (interactive)
-  (let ((files (directory-files-recursively denden-content-directory (rx ".org" eos)))
-        (lines nil))
-    (dolist (file files)
-      (when (denden-file-is-draft-p file)
-        (push (file-relative-name file denden-content-directory) lines)))
-    (setq lines (nreverse lines))
-    (with-current-buffer (get-buffer-create "*denden-drafts*")
-      (erase-buffer)
-      (if lines
-          (dolist (line lines) (insert line "\n"))
-        (insert "No drafts."))
-      (display-buffer (current-buffer)))))
-
-;;;###autoload
-(defun denden-diff (old-file new-file)
-  "Compare OLD-FILE and NEW-FILE's rendered structure, shown in *denden-diff*."
-  (interactive "fFirst file: \nfSecond file: ")
-  (let ((diffs (denden-diff-pages old-file new-file)))
-    (with-current-buffer (get-buffer-create "*denden-diff*")
-      (erase-buffer)
-      (if diffs
-          (dolist (diff diffs) (insert (format "%S\n\n" diff)))
-        (insert "No differences."))
-      (display-buffer (current-buffer)))))
-
-(defun denden--all-content-tags ()
-  "Return every distinct #+tags: (or #+tags[]:) value used across
-`denden-content-directory'."
-  (delete-dups
-   (seq-mapcat
-    (lambda (file)
-      (denden--list-keyword-value
-       (with-temp-buffer
-         (insert-file-contents file)
-         (org-mode)
-         (org-collect-keywords '("TAGS" "TAGS[]")))
-       "TAGS"))
-    (directory-files-recursively denden-content-directory (rx ".org" eos)))))
-
-(defvar org-capture-templates)
-(declare-function org-capture "org-capture" (&optional goto keys))
-(declare-function org-set-tags-command "org" (&optional arg))
-
-(defun denden--capture-standalone-post (title tags draft)
-  "Create a standalone post file for TITLE under `denden-post-directory', via
-`org-capture'."
-  (require 'org-capture)
-  (let* ((slug (denden-slugify-path title))
-         (file (expand-file-name (concat slug ".org") denden-post-directory))
-         (template (concat (format denden-new-post-template title
-                                   (format-time-string "%Y-%m-%d")
-                                   (string-join tags " ")
-                                   (if draft "true" "false"))
-                           "%?")))
-    (make-directory (file-name-directory file) t)
-    (let ((org-capture-templates
-           (list (list "d" "denden new post" 'plain (list 'file file)
-                       template :jump-to-captured t :empty-lines-after 1))))
-      (org-capture nil "d"))))
-
-;;;###autoload
-(defun denden-new ()
-  "Create a new post via `org-capture'."
-  (interactive)
-  (denden--capture-standalone-post
-   (read-string "Title: ") (completing-read-multiple "Tags: " (denden--all-content-tags))
-   (y-or-n-p "Draft? ")))
-
-
-(defvar denden-preview--server-started nil
-  "Non-nil once `denden-preview-current-file' has started a preview server.")
-
-(defun denden--project-for-file (file)
-  "Return the expanded leaf project whose :base-directory contains FILE, or
-nil."
-  (cl-find-if
-   (lambda (project)
-     (let ((base (org-publish-property :base-directory project)))
-       (and base (file-in-directory-p file (expand-file-name base)))))
-   (org-publish-expand-projects org-publish-project-alist)))
-
-(defun denden--preview-url-for (file)
-  "Return FILE's pretty-URL path, or nil if FILE has no project."
-  (let ((project (denden--project-for-file file)))
-    (when project
-      (let* ((pub-dir (file-name-as-directory (org-publish-property :publishing-directory project)))
-             (output (denden-output-file-for file project)))
-        (concat "/" (denden-pretty-url (file-relative-name output pub-dir)))))))
-
-;;;###autoload
-(defun denden-preview-current-file ()
-  "Rebuild the current file for local preview and open it in a browser, once
-per session."
-  (interactive)
-  (let* ((file (or buffer-file-name (error "This buffer has no file")))
-         (url (denden--preview-url-for file)))
-    (unless url
-      (error "Denden: %s is not part of any known project" file))
-    (if denden-preview--server-started
-        (denden-build-dev-file file)
-      (denden-build-dev
-       t
-       (lambda ()
-         (denden--start-preview-server)
-         (setq denden-preview--server-started t)
-         (browse-url (concat (string-remove-suffix "/" denden-preview-base-url) url)))))))
-
-;;;###autoload
-(defun denden-find ()
-  "Find a file under `denden-project-root-directory' (`project-find-file')."
-  (interactive)
-  (let ((default-directory denden-project-root-directory))
-    (project-find-file)))
-
-;;;###autoload
-(defun denden-site ()
-  "Switch to `denden-project-root-directory' (`project-switch-project')."
-  (interactive)
-  (project-switch-project denden-project-root-directory))
+(defun denden-build (site)
+  "Build SITE: write every page, output and static file into a clean folder.
+The new site is written next to the publishing folder, its internal
+links are checked, and only then does it replace the old site.  A
+failed build, or a broken link when `denden-broken-link-action' is
+`error', leaves the old site as it was.
+Interactively, ask for a site defined with `denden-define-site',
+or use the only one.  Return the publishing folder."
+  (interactive (list (denden--read-site)))
+  (let* ((start (float-time))
+         (directory (directory-file-name (denden--site-directory site 'publishing)))
+         (new-directory (concat directory ".new"))
+         (old-directory (concat directory ".old")))
+    (denden--check-publishing-directory site directory)
+    (dolist (leftover (list new-directory old-directory))
+      (when (file-exists-p leftover)
+        (delete-directory leftover t)))
+    (let* ((pages (denden-collect-pages site))
+           (files (denden-render-site site pages)))
+      (condition-case problem
+          (progn
+            (denden--write-site site files new-directory)
+            (denden--check-links pages new-directory))
+        (error
+         (when (file-exists-p new-directory)
+           (delete-directory new-directory t))
+         (signal (car problem) (cdr problem))))
+      (when (file-exists-p directory)
+        (rename-file directory old-directory))
+      (rename-file new-directory directory)
+      (when (file-exists-p old-directory)
+        (delete-directory old-directory t))
+      (message "Denden: built %d pages and %d other files into %s in %.1f s"
+               (length pages) (- (length files) (length pages)) directory
+               (- (float-time) start))
+      directory)))
 
 (provide 'denden)
 ;;; denden.el ends here
