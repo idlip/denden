@@ -59,44 +59,58 @@ that never skip a level on the way down."
 (ert-deftest denden-example-test-pages-are-well-formed ()
   "Every page of the example has one h1, image alt text and no skipped levels."
   (ert-with-temp-directory directory
-                           (let ((public (denden-example-test--build directory)))
-                             (dolist (file (directory-files-recursively public (rx ".html" eos)))
-                               (should (equal (cons (file-relative-name file public)
-                                                    (denden-example-test--structure-problems
-                                                     (with-temp-buffer (insert-file-contents file) (buffer-string))))
-                                              (list (file-relative-name file public)))))
-                             (should (string-search
-                                      "<a class=\"u-url p-name\" href=\"/blog/hello-world/\">Hello, World</a>"
-                                      (with-temp-buffer
-                                        (insert-file-contents (expand-file-name "blog/index.html" public))
-                                        (buffer-string)))))))
+    (let ((public (denden-example-test--build directory)))
+      (dolist (file (directory-files-recursively public (rx ".html" eos)))
+        (should (equal (cons (file-relative-name file public)
+                             (denden-example-test--structure-problems
+                              (with-temp-buffer (insert-file-contents file) (buffer-string))))
+                       (list (file-relative-name file public)))))
+      (should (string-search
+               "<a class=\"u-url p-name\" href=\"/blog/hello-world/\">Hello, World</a>"
+               (with-temp-buffer
+                 (insert-file-contents (expand-file-name "blog/index.html" public))
+                 (buffer-string)))))))
+
+(ert-deftest denden-example-test-footer ()
+  "Each page links its own source; generated pages link the example folder."
+  (ert-with-temp-directory directory
+    (let* ((public (denden-example-test--build directory))
+           (read (lambda (file)
+                   (with-temp-buffer
+                     (insert-file-contents (expand-file-name file public))
+                     (buffer-string)))))
+      (should (string-search
+               "example/content/blog/hello-world.org\">Source of this page</a> · Built with <a href=\"https://github.com/idlip/denden\">Denden</a>"
+               (funcall read "blog/hello-world/index.html")))
+      (should (string-search "denden/blob/master/example/\">Source</a>"
+                             (funcall read "tags/index.html"))))))
 
 (ert-deftest denden-example-test-modus-colors ()
   "The example's colours and code colours come from Modus Vivendi."
   (ert-with-temp-directory directory
-                           (let ((css (with-temp-buffer
-                                        (insert-file-contents
-                                         (expand-file-name "modus.css" (denden-example-test--build directory)))
-                                        (buffer-string))))
-                             (should (string-search "--background-color: #000000;" css))
-                             (should (string-search ".org-keyword { color: #b6a0ff; }" css))
-                             (should-not (memq 'modus-vivendi custom-enabled-themes)))))
+    (let ((css (with-temp-buffer
+                 (insert-file-contents
+                  (expand-file-name "modus.css" (denden-example-test--build directory)))
+                 (buffer-string))))
+      (should (string-search "--background-color: #000000;" css))
+      (should (string-search ".org-keyword { color: #b6a0ff; }" css))
+      (should-not (memq 'modus-vivendi custom-enabled-themes)))))
 
 (ert-deftest denden-example-test-matches-golden ()
   "A build of the example is the same, file by file, as the golden copy."
   (skip-unless (file-directory-p denden-example-test--golden))
   (ert-with-temp-directory directory
-                           (let ((public (denden-example-test--build directory)))
-                             (should (equal (denden-example-test--files public)
-                                            (denden-example-test--files denden-example-test--golden)))
-                             (dolist (file (denden-example-test--files public))
-                               (should (equal (cons file (with-temp-buffer
-                                                           (insert-file-contents (expand-file-name file public))
-                                                           (buffer-string)))
-                                              (cons file (with-temp-buffer
-                                                           (insert-file-contents
-                                                            (expand-file-name file denden-example-test--golden))
-                                                           (buffer-string)))))))))
+    (let ((public (denden-example-test--build directory)))
+      (should (equal (denden-example-test--files public)
+                     (denden-example-test--files denden-example-test--golden)))
+      (dolist (file (denden-example-test--files public))
+        (should (equal (cons file (with-temp-buffer
+                                    (insert-file-contents (expand-file-name file public))
+                                    (buffer-string)))
+                       (cons file (with-temp-buffer
+                                    (insert-file-contents
+                                     (expand-file-name file denden-example-test--golden))
+                                    (buffer-string)))))))))
 
 (provide 'denden-example-test)
 ;;; denden-example-test.el ends here

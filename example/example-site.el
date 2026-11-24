@@ -62,6 +62,22 @@ change how Emacs looks.  _SITE and _PAGES are not used."
                                              (funcall color (cdr entry))))
                                    example-site-code-colors ""))))))
 
+(defconst example-site-source "https://github.com/idlip/denden/blob/master/example/"
+  "Address of the example's files in the Denden repository.")
+
+(defun example-site-footer (site page)
+  "Return footer nodes for PAGE of SITE: its source, and a Denden credit.
+A page made from an Org file links to that file; a generated page,
+such as a tag list, links to the example's folder."
+  (let ((source (denden-page-source page)))
+    `((p nil
+         (a (:href ,(concat example-site-source
+                            (and source (file-relative-name
+                                         source (denden-site-root-directory site)))))
+            ,(if source "Source of this page" "Source"))
+         " · Built with "
+         (a (:href "https://github.com/idlip/denden") "Denden")))))
+
 (denden-define-site example-site
   "The Denden example site, a small blog."
   :title "A Plain Blog"
@@ -70,6 +86,7 @@ change how Emacs looks.  _SITE and _PAGES are not used."
   :base-url "https://denden.idlip.in/"
   :menu '(("Home" . "/") ("Blog" . "/blog/") ("Tags" . "/tags/") ("About" . "/about/"))
   :stylesheets '("/modus.css" "/style.css")
+  :footer #'example-site-footer
   :outputs (list #'denden-feed-output #'denden-term-outputs #'denden-sitemap-output
                  #'denden-robots-output #'denden-redirect-outputs
                  #'example-site-modus-css-output))

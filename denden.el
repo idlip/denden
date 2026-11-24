@@ -209,6 +209,10 @@ for a search index.")
         :documentation "Links in the header of the default page, as (LABEL . URL).")
   (stylesheets nil
                :documentation "Addresses of the style sheets the default page links.")
+  (footer nil
+          :documentation "Function of the site and a page that returns more footer nodes.
+The default page shell puts them after the author and the feed link;
+nil adds nothing.")
   (feed-entry-count 20
                     :documentation "Number of entries in each feed, or nil for all.")
   (link-label-rules nil
@@ -687,8 +691,8 @@ address of a section.  See `denden-heading-anchor-text'."
       (concat (substring html 0 position)
               (denden-serialize-node
                `(a (:class "heading-anchor"
-                           :href ,(concat "#" (org-element-property :CUSTOM_ID headline))
-                           :aria-label ,denden-heading-anchor-label)
+                    :href ,(concat "#" (org-element-property :CUSTOM_ID headline))
+                    :aria-label ,denden-heading-anchor-label)
                    ,denden-heading-anchor-text))
               (substring html position)))))
 
@@ -954,7 +958,7 @@ no terms."
                           (mapcar (lambda (term)
                                     (if linked
                                         `(a (:class "p-category"
-                                                    :href ,(concat "/" (denden-term-url taxonomy term)))
+                                             :href ,(concat "/" (denden-term-url taxonomy term)))
                                             ,(concat "#" term))
                                       `(span (:class "p-category") ,(concat "#" term))))
                                   (denden-page-taxonomy-terms page taxonomy)))
@@ -971,7 +975,7 @@ It is marked up as an h-feed of h-entries (see microformats.org)."
                               (denden-date-node (denden-page-date page)))
                         " "
                         (a (:class "u-url p-name"
-                                   :href ,(concat "/" (denden-page-url page)))
+                            :href ,(concat "/" (denden-page-url page)))
                            ,(denden-page-title page))))
                  (denden-sort-pages-by-date pages))))
 
@@ -1041,7 +1045,7 @@ image."
             (meta (:property "og:image:alt" :content ,title))
             (meta (:name "twitter:image" :content ,image-url))))
      `((meta (:name "twitter:card"
-                    :content ,(if image-url "summary_large_image" "summary"))))
+              :content ,(if image-url "summary_large_image" "summary"))))
      (and published
           `((script (:type "application/ld+json")
                     (raw-html
@@ -1066,7 +1070,8 @@ image."
 The head has the character set, the viewport, the title,
 `denden-seo-head-nodes', the site's style sheets and, when the site
 has a feed, its link.  The header links home and shows the site's
-menu.  The footer names the author as an h-card and links the feed.
+menu.  The footer names the author as an h-card, links the feed, and
+ends with the nodes of the site's footer function, if it has one.
 The markup is plain and semantic, so a classless style sheet styles
 it well.  _PAGES is not used here; a site's own shell may use it."
   `(html (:lang ,(denden-page-language site page))
@@ -1080,8 +1085,8 @@ it well.  _PAGES is not used here; a site's own shell may use it."
                ,@(denden-seo-head-nodes site page)
                ,(and (memq #'denden-feed-output (denden-site-outputs site))
                      `(link (:rel "alternate" :type "application/atom+xml"
-                                  :title ,(denden-site-title site)
-                                  :href ,(concat "/" denden-feed-url))))
+                             :title ,(denden-site-title site)
+                             :href ,(concat "/" denden-feed-url))))
                ,@(mapcar (lambda (url) `(link (:rel "stylesheet" :href ,url)))
                          (denden-site-stylesheets site)))
          (body nil
@@ -1098,7 +1103,9 @@ it well.  _PAGES is not used here; a site's own shell may use it."
                                  (a (:class "p-name u-url" :href "/")
                                     ,(denden-site-author site))))
                        ,(and (memq #'denden-feed-output (denden-site-outputs site))
-                             `(p nil (a (:href ,(concat "/" denden-feed-url)) "Feed")))))))
+                             `(p nil (a (:href ,(concat "/" denden-feed-url)) "Feed")))
+                       ,@(and (denden-site-footer site)
+                              (funcall (denden-site-footer site) site page))))))
 
 (defun denden-render-page (site page pages)
   "Return the full HTML of PAGE of SITE, given all PAGES.
@@ -1208,7 +1215,7 @@ A page with its own #+author: names that author in its entry."
                (and author `(author nil (name nil ,author))))
             ,@(mapcar (lambda (tag)
                         `(category (:term ,(downcase tag) :label ,tag
-                                          :scheme ,(concat (denden-base-url site) "tags/"))))
+                                    :scheme ,(concat (denden-base-url site) "tags/"))))
                       (denden-page-taxonomy-terms page "tags"))
             ,(let ((summary (denden-page-excerpt page)))
                (and summary `(summary nil ,summary)))

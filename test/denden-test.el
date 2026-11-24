@@ -150,18 +150,18 @@
 (ert-deftest denden-test-collect-bad-date ()
   "A date that does not exist stops collecting and names the file."
   (ert-with-temp-directory root
-                           (make-directory (expand-file-name "content" root))
-                           (with-temp-file (expand-file-name "content/bad.org" root)
-                             (insert "#+date: [2024-13-45 Mon]\n"))
-                           (let* ((denden-lastmod-from-git nil)
-                                  (error-data (should-error (denden-collect-pages
-                                                             (denden-site-create :root-directory root)))))
-                             (should (string-search "bad.org" (cadr error-data))))))
+    (make-directory (expand-file-name "content" root))
+    (with-temp-file (expand-file-name "content/bad.org" root)
+      (insert "#+date: [2024-13-45 Mon]\n"))
+    (let* ((denden-lastmod-from-git nil)
+           (error-data (should-error (denden-collect-pages
+                                      (denden-site-create :root-directory root)))))
+      (should (string-search "bad.org" (cadr error-data))))))
 
 (ert-deftest denden-test-git-table-outside-git ()
   "Outside a git repository the last-modified table is nil."
   (ert-with-temp-directory directory
-                           (should-not (denden--git-lastmod-table directory))))
+    (should-not (denden--git-lastmod-table directory))))
 
 ;;;; Page lists
 
@@ -316,15 +316,15 @@ BINDINGS are extra fields for the site, such as (:layouts ...).  BODY
 sees `site' and `public', the publishing folder."
   (declare (indent 1) (debug t))
   `(ert-with-temp-directory temporary
-                            (let* ((denden-lastmod-from-git nil)
-                                   (inhibit-message t)
-                                   (public (expand-file-name "public" temporary))
-                                   (site (denden-site-create :root-directory denden-test--fixture-site
-                                                             :taxonomies '("tags" "refs")
-                                                             :title "Fixture"
-                                                             :publishing-directory public
-                                                             ,@bindings)))
-                              ,@body)))
+     (let* ((denden-lastmod-from-git nil)
+            (inhibit-message t)
+            (public (expand-file-name "public" temporary))
+            (site (denden-site-create :root-directory denden-test--fixture-site
+                                      :taxonomies '("tags" "refs")
+                                      :title "Fixture"
+                                      :publishing-directory public
+                                      ,@bindings)))
+       ,@body)))
 
 (defun denden-test--read (file)
   "Return the text of FILE."
@@ -404,15 +404,15 @@ sees `site' and `public', the publishing folder."
 (ert-deftest denden-test-check-links ()
   "The link check reports links to files the build did not write."
   (ert-with-temp-directory directory
-                           (make-directory (expand-file-name "log/x" directory) t)
-                           (with-temp-file (expand-file-name "log/x/index.html" directory))
-                           (with-temp-file (expand-file-name "rss.xml" directory))
-                           (let ((page (denden-page-create :source "a.org"
-                                                           :links '("log/x/" "log/x" "rss.xml" "log/x/#part")))
-                                 (denden-broken-link-action 'error))
-                             (denden--check-links (list page) directory)
-                             (setf (denden-page-links page) '("nowhere.org"))
-                             (should-error (denden--check-links (list page) directory)))))
+    (make-directory (expand-file-name "log/x" directory) t)
+    (with-temp-file (expand-file-name "log/x/index.html" directory))
+    (with-temp-file (expand-file-name "rss.xml" directory))
+    (let ((page (denden-page-create :source "a.org"
+                                    :links '("log/x/" "log/x" "rss.xml" "log/x/#part")))
+          (denden-broken-link-action 'error))
+      (denden--check-links (list page) directory)
+      (setf (denden-page-links page) '("nowhere.org"))
+      (should-error (denden--check-links (list page) directory)))))
 
 ;;;; Outputs
 
