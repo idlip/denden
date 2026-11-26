@@ -161,7 +161,7 @@
 (ert-deftest denden-test-git-table-outside-git ()
   "Outside a git repository the last-modified table is nil."
   (ert-with-temp-directory directory
-    (should-not (denden--git-lastmod-table directory))))
+    (should-not (denden--git-times-table directory))))
 
 ;;;; Page lists
 
@@ -445,7 +445,10 @@ sees `site' and `public', the publishing folder."
                (feed (cdar (denden-feed-output site pages))))
     (should (string-prefix-p "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<feed xmlns=\"http://www.w3.org/2005/Atom\">" feed))
     (should (string-search "<link rel=\"self\" type=\"application/atom+xml\" href=\"https://example.org/feed.xml\" />" feed))
-    (should (string-search "<updated>2025-03-01T00:00:00Z</updated>" feed))
+    (should (string-search (format "<updated>%s</updated>"
+                                   (format-time-string
+                                    "%FT%TZ" (denden-page-date (denden-test--page "log/third/" pages)) t))
+                           feed))
     (should (< (string-search "<title>Third</title>" feed)
                (string-search "<title>Second</title>" feed)
                (string-search "<title>First Post</title>" feed)))
@@ -454,6 +457,8 @@ sees `site' and `public', the publishing folder."
     (should (string-search "<summary>See Second and bold words and First Post. A static file: ." feed))
     (should-not (string-search "Note</summary>" feed))
     (should (string-search "<content type=\"html\">&lt;p&gt;" feed))
+    (should (string-search "Getting started&lt;/h2&gt;" feed))
+    (should-not (string-search "heading-anchor" feed))
     (setf (denden-site-feed-entry-count site) 1)
     (should-not (string-search "<title>Second</title>"
                                (cdar (denden-feed-output site pages))))))
@@ -530,6 +535,20 @@ sees `site' and `public', the publishing folder."
              (denden-export-org-string
               site "#+begin_src emacs-lisp :exports results\n(length denden-current-pages)\n#+end_src\n" pages)))
     (should-not denden-current-pages)))
+
+(ert-deftest denden-test-resolve-time ()
+  "A written time wins, then a commit on the same day, then the default time."
+  (let ((denden-default-time "22:00")
+        (date (date-to-time "2026-11-24 00:00"))
+        (written (date-to-time "2026-11-24 09:15"))
+        (same-day (date-to-time "2026-11-24 18:40"))
+        (next-day (date-to-time "2026-11-25 00:20")))
+    (should (equal (denden-resolve-time written t same-day) written))
+    (should (equal (denden-resolve-time date nil same-day) same-day))
+    (should (equal (format-time-string "%F %H:%M" (denden-resolve-time date nil next-day))
+                   "2026-11-24 22:00"))
+    (should (equal (format-time-string "%F %H:%M" (denden-resolve-time date nil nil))
+                   "2026-11-24 22:00"))))
 
 (provide 'denden-test)
 ;;; denden-test.el ends here

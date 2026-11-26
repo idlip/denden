@@ -58,6 +58,7 @@
 (require 'org)
 (require 'org-element)
 (require 'ox-html)
+(require 'parse-time)
 (require 'url-parse)
 (require 'url-util)
 
@@ -98,6 +99,16 @@ content would differ."
 
 ;; Cosmetic options: small touches on the markup Denden writes.  Each
 ;; default follows current practice; change them to taste.
+
+(defcustom denden-default-time "12:00"
+  "Time of day, as HH:MM, for a date written without a time.
+A date such as [2026-11-24 Tue] gets the time of the git commit that
+first added its page, when that commit is on the same day; otherwise
+it gets this time.  Feeds sort by time, so it sets where the post
+sits among the others of that day.  For example, \"22:00\"."
+  :type 'string
+  :group 'denden
+  :package-version '(denden . "0.1.0"))
 
 (defcustom denden-heading-anchor-text "#"
   "Text of the link at the end of each heading, or nil for no link.
@@ -308,25 +319,46 @@ TEXT is the link's description as plain text, or nil when it has none.")
 ;; from memory.  Collecting reads only keywords, which needs no full
 ;; parse; the one full parse of each file is its export.
 
-(defun denden--git-lastmod-table (directory)
-  "Return a hash table from each file under DIRECTORY to its last commit time.
-It uses one git call for all files.  Return nil when DIRECTORY is not
-in a git repository or git is not installed."
+(defun denden--git-times-table (directory)
+  "Return a hash table from each file under DIRECTORY to its commit times.
+Each value is (LAST . FIRST): the time of the newest commit that
+changed the file and of the oldest one, which added it.  It uses one
+git call for all files.  Return nil when DIRECTORY is not in a git
+repository or git is not installed."
   (let ((default-directory (file-name-as-directory directory))
         (table (make-hash-table :test #'equal))
         (time nil))
     (condition-case nil
         (dolist (line (process-lines "git" "log" "--relative" "--name-only"
-                                     "--format=commit:%cs" "--" "."))
+                                     "--format=commit:%cI" "--" "."))
           (cond
            ((string-prefix-p "commit:" line)
-            (setq time (date-to-time (substring line (length "commit:")))))
+            (setq time (parse-iso8601-time-string (substring line (length "commit:")))))
            ((string-empty-p line))
-           (t (let ((file (expand-file-name line)))
-                (unless (gethash file table)
-                  (puthash file time table))))))
+           (t (let* ((file (expand-file-name line))
+                     (times (gethash file table)))
+                ;; The log is newest first, so the first time seen is the
+                ;; last change and the final one is the first commit.
+                (puthash file (cons (if times (car times) time) time) table)))))
       (error (setq table nil)))
     table))
+
+(defun denden-resolve-time (date clock-given commit-time)
+  "Return the full time of DATE, a time value for a day.
+When CLOCK-GIVEN is non-nil, DATE already has its time and is
+returned as it is.  Otherwise COMMIT-TIME, when it falls on the same
+day, gives the time; failing that, `denden-default-time' does."
+  (cond
+   (clock-given date)
+   ((and commit-time
+         (equal (format-time-string "%F" commit-time) (format-time-string "%F" date)))
+    commit-time)
+   (t (let ((decoded (decode-time date))
+            (clock (mapcar #'string-to-number (split-string denden-default-time ":"))))
+        (setf (decoded-time-hour decoded) (car clock)
+              (decoded-time-minute decoded) (or (cadr clock) 0)
+              (decoded-time-second decoded) 0)
+        (encode-time decoded)))))
 
 (defun denden--slugify-path (relative-path)
   "Return RELATIVE-PATH with each part made lowercase, safe for a URL.
@@ -397,17 +429,23 @@ more than once has its values joined with a space, as Org does for
   "Return the meta plist key for the keyword NAME, so NO_COMMENT gives :no-comment."
   (intern (concat ":" (string-replace "_" "-" (downcase name)))))
 
-(defun denden--read-page (site file content-directory lastmod-table)
+(defun denden--read-page (site file content-directory git-times)
   "Return the page record of FILE, an Org file of SITE.
-CONTENT-DIRECTORY is the absolute content folder.  LASTMOD-TABLE maps
-files to their last commit time, or is nil."
+CONTENT-DIRECTORY is the absolute content folder.  GIT-TIMES maps
+files to their (LAST . FIRST) commit times, or is nil."
   (with-temp-buffer
     (insert-file-contents file)
     (delay-mode-hooks (org-mode))
     (let* ((keywords (denden--buffer-keywords))
            (relative (file-relative-name file content-directory))
            (date-text (cdr (assoc "DATE" keywords)))
-           (date (and date-text (denden--parse-date date-text file)))
+           (times (and git-times (gethash file git-times)))
+           (date (and date-text
+                      (denden-resolve-time
+                       (denden--parse-date date-text file)
+                       (string-match-p (rx digit ":" digit digit) date-text)
+                       (cdr times))))
+           (last-change (car times))
            (taxonomies (denden-site-taxonomies site)))
       (denden-page-create
        :source file
@@ -415,7 +453,10 @@ files to their last commit time, or is nil."
        :url (denden--page-url relative)
        :title (or (cdr (assoc "TITLE" keywords)) (file-name-base file))
        :date date
-       :lastmod (or (and lastmod-table (gethash file lastmod-table)) date)
+       ;; A change is never earlier than the page's own date.
+       :lastmod (if (and last-change date (time-less-p last-change date))
+                    date
+                  (or last-change date))
        :description (cdr (assoc "DESCRIPTION" keywords))
        :section (if (string-search "/" relative)
                     (car (split-string relative "/"))
@@ -452,8 +493,8 @@ with #+draft: t are left out unless `denden-include-drafts' is
 non-nil.  The pages come in the order of their file names."
   (let* ((content-directory (file-name-as-directory
                              (denden--site-directory site 'content)))
-         (lastmod-table (and denden-lastmod-from-git
-                             (denden--git-lastmod-table content-directory)))
+         (git-times (and denden-lastmod-from-git
+                         (denden--git-times-table content-directory)))
          (files (seq-remove
                  (lambda (file)
                    (seq-some (lambda (part) (string-prefix-p "." part))
@@ -464,7 +505,7 @@ non-nil.  The pages come in the order of their file names."
     (seq-remove (lambda (page)
                   (and (denden-page-draft page) (not denden-include-drafts)))
                 (mapcar (lambda (file)
-                          (denden--read-page site file content-directory lastmod-table))
+                          (denden--read-page site file content-directory git-times))
                         (sort files)))))
 
 ;;;; Page lists
@@ -1195,9 +1236,17 @@ page first; a page with no body and no description gives nil."
                (and (not (string-empty-p text)) text))))))
 
 (defun denden--feed-time (time)
-  "Return TIME as an Atom date, midnight UTC of its day.
-Denden's dates are days, so the time of day is always midnight."
-  (format-time-string "%FT00:00:00Z" time))
+  "Return TIME as an Atom date in UTC, such as 2026-11-24T16:30:00Z.
+See `denden-resolve-time' for where the time of a page's date comes from."
+  (format-time-string "%FT%TZ" time t))
+
+(defun denden--without-heading-anchors (html)
+  "Return HTML without the links Denden adds after each heading.
+A feed reader shows them as a stray mark, and their #id points to no
+place in the reader.  See `denden-heading-anchor-text'."
+  (replace-regexp-in-string
+   (rx "<a class=\"heading-anchor\"" (* (not (in ">"))) ">" (* (not (in "<"))) "</a>")
+   "" html t t))
 
 (defun denden--atom-entry (site page)
   "Return the Atom entry node of PAGE of SITE.
@@ -1219,7 +1268,8 @@ A page with its own #+author: names that author in its entry."
                       (denden-page-taxonomy-terms page "tags"))
             ,(let ((summary (denden-page-excerpt page)))
                (and summary `(summary nil ,summary)))
-            (content (:type "html") ,(or (denden-page-body page) "")))))
+            (content (:type "html")
+                     ,(denden--without-heading-anchors (or (denden-page-body page) ""))))))
 
 (cl-defun denden-atom-feed (site pages &key title url self-url icon rights)
   "Return an Atom feed of SITE with an entry for each of PAGES.
