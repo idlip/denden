@@ -13,7 +13,7 @@ Demo: https://denden.idlip.in/ is the example site in =example/=, built with Den
 * What it does
 
 - Reads each Org file once per build, and keeps everything it learns in a page record.
-- Exports each page body once, with Org's HTML backend plus a few changes: stable heading ids, links between pages that show the current title, short labels for bare URLs, callouts, lazy images, code coloured through CSS classes.
+- Exports each page body once, with Org's HTML backend plus a few changes: stable heading ids, links between pages that show the current title, short labels for bare URLs, lazy images, code coloured through CSS classes.
 - Renders each page through a layout and a page shell. Templates are plain Lisp lists, such as =(p (:class "note") "Hello")=.
 - Writes feeds, a sitemap, =robots.txt=, redirects for old addresses and, if you want it, a search index.
 - Builds the whole site, clean, every time. It writes the new site next to the old one, checks every internal link, and only then replaces the old site. A failed build leaves the old site as it was.
@@ -102,7 +102,7 @@ Any other keyword is kept in the page's =meta= plist, so your own templates can 
 
 Links between pages can be written as =[[file:other.org]]= or =[[/blog/other/]]=. Both point to the page's address and show its current title, unless the link's description has markup. Links to files in the static folder, such as =[[/images/cat.png]]=, are left as they are.
 
-A special block whose type is one of the site's =:callout-types=, such as =#+begin_note=, becomes a labelled note.
+A special block such as =#+begin_note= exports as Org writes it, =<div class="note">=, so its look belongs to your style sheet.
 
 Code blocks run while a page exports only when the site sets =:evaluate-code t=; only set it for content you wrote. While a page exports, code can read =denden-current-site=, =denden-current-page= and =denden-current-pages=, for example to list the newest posts on the home page.
 
@@ -130,7 +130,6 @@ Code blocks run while a page exports only when the site sets =:evaluate-code t=;
 | =:stylesheets=          | =nil=                                          | Style sheets the default page shell links                                                       |
 | =:feed-entry-count=     | =20=                                           | Entries in the feed; nil for all                                                                |
 | =:link-label-rules=     | =nil=                                          | (REGEXP . REPLACEMENT) rules for bare URL labels                                                |
-| =:callout-types=        | note, tip, warn                              | Alist of (TYPE . LABEL) for callouts                                                            |
 | =:evaluate-code=        | =nil=                                          | Run code blocks while exporting                                                                 |
 
 =M-x denden-build= asks which defined site to build, or builds the only one. From Lisp or a batch Emacs, call =(denden-build my-site)=.

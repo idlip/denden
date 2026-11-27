@@ -147,22 +147,20 @@ footer {
   justify-content: space-between;
 }
 
-.callout {
-  border-left: 3px solid var(--border-color);
+.note,
+.tip,
+.warn {
+  border-left: 3px solid var(--link-color);
   padding: 0.75rem 1rem;
   margin: 1rem 0;
   border-radius: 0 4px 4px 0;
 }
 
-.callout[data-callout="note"] {
-  border-left-color: var(--link-color);
-}
-
-.callout[data-callout="tip"] {
+.tip {
   border-left-color: #4caf7d;
 }
 
-.callout[data-callout="warn"] {
+.warn {
   border-left-color: #d08a3e;
 }
 

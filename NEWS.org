@@ -16,4 +16,5 @@ Denden was rebuilt from scratch as a small library. Everything below is new or c
 - Code blocks run only when the site sets =:evaluate-code=, and can read =denden-current-site=, =denden-current-page= and =denden-current-pages=.
 - Removed from the package: the preview server, live reload, the file watcher, the new-post command, the page differ and the linter command. Use a static file server, a file watcher and your own capture template; the linter's checks are tests.
 - A page's date gets its time from =#+date: [2026-11-24 Tue 21:30]=, else from the git commit that added the page when it is on the same day, else from =denden-default-time=. Feeds write real times, so readers sort a post among the others of its day correctly.
+- Special blocks such as =#+begin_note= export as Org writes them (=<div class="note">=); the site's style sheet decides their look. The =:callout-types= field and its label are gone.
 - Needs Emacs 30.1 and Org 9.8.

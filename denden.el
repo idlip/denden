@@ -228,8 +228,6 @@ nil adds nothing.")
                     :documentation "Number of entries in each feed, or nil for all.")
   (link-label-rules nil
                     :documentation "Alist of (REGEXP . REPLACEMENT) for bare URL labels.")
-  (callout-types '(("note" . "Note") ("tip" . "Tip") ("warn" . "Warning"))
-                 :documentation "Alist of special block types shown as callouts.")
   (evaluate-code nil
                  :documentation "Non-nil means run code blocks while exporting.
 Only set it for content you wrote: the code runs without asking."))
@@ -859,25 +857,10 @@ See `denden-figure-numbers'."
        (rx "<span class=\"figure-number\">" (+ (not (in "<"))) "</span>")
        "" html t t))))
 
-(defun denden-special-block (special-block contents info)
-  "Transcode SPECIAL-BLOCK with CONTENTS and INFO, showing callouts.
-A block whose type is one of the site's callout types, such as
-#+begin_note, becomes a labelled note; any other block is written
-as ox-html writes it."
-  (let* ((type (downcase (org-element-property :type special-block)))
-         (label (cdr (assoc type (denden-site-callout-types
-                                  (plist-get info :denden-site))))))
-    (if label
-        (format (concat "<div class=\"callout\" role=\"note\" data-callout=\"%s\">\n"
-                        "<p>%s</p>\n%s</div>")
-                type label (or contents ""))
-      (org-html-special-block special-block contents info))))
-
 (org-export-define-derived-backend 'denden-html 'html
   :translate-alist '((headline . denden-headline)
                      (link . denden-link)
                      (paragraph . denden-paragraph)
-                     (special-block . denden-special-block)
                      (src-block . denden-src-block))
   :filters-alist '((:filter-parse-tree . denden--prepare-tree)))
 
@@ -1211,13 +1194,12 @@ Heading anchors (see `denden-heading-anchor-text') are left out."
     (denden--dom-text dom)))
 
 (defun denden--prose-paragraphs (node)
-  "Return the p elements under NODE in order, leaving out figures and callouts.
-A figure holds an image and its caption, and a callout a label and
-a note, which are not the prose of the page."
+  "Return the p elements under NODE in order, leaving out figures.
+A figure holds an image and its caption, which are not the prose of
+the page."
   (cond
    ((not (consp node)) nil)
    ((eq (dom-tag node) 'figure) nil)
-   ((equal (dom-attr node 'class) "callout") nil)
    ((eq (dom-tag node) 'p) (list node))
    (t (mapcan #'denden--prose-paragraphs (dom-children node)))))
 

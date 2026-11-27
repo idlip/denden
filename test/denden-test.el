@@ -294,7 +294,7 @@
 (ert-deftest denden-test-export-blocks ()
   "Callouts, checkboxes and highlighted code come out as the site expects."
   (let ((body (car (denden-test--export "log/third/"))))
-    (should (string-search "<div class=\"callout\" role=\"note\" data-callout=\"note\">\n<p>Note</p>" body))
+    (should (string-match-p (rx "<div class=\"note\"" (* (not (in ">"))) ">\n<p>\nMind the gap.") body))
     (should (string-search "<input type='checkbox' checked='checked' />" body))
     (should (string-search "<pre tabindex=\"0\" class=\"src src-emacs-lisp\">" body))
     (should (string-search "<span class=\"org-string\">" body))))
@@ -455,7 +455,6 @@ sees `site' and `public', the publishing folder."
     (should-not (string-search "<title>about</title>" feed))
     (should (string-search "<category term=\"emacs\" label=\"emacs\" scheme=\"https://example.org/tags/\"></category>" feed))
     (should (string-search "<summary>See Second and bold words and First Post. A static file: ." feed))
-    (should-not (string-search "Note</summary>" feed))
     (should (string-search "<content type=\"html\">&lt;p&gt;" feed))
     (should (string-search "Getting started&lt;/h2&gt;" feed))
     (should-not (string-search "heading-anchor" feed))

@@ -8,7 +8,7 @@ Org has more than paragraphs and lists. Here is how a few of its other pieces co
 * Callouts
 
 #+begin_note
-A note block becomes a labelled callout. The site decides which block types are callouts.
+A note block becomes =<div class="note">=, as Org writes it. The style sheet decides how it looks.
 #+end_note
 
 #+begin_tip
